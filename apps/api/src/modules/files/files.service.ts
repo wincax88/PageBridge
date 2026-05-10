@@ -13,6 +13,7 @@ interface CreateFileInput {
 
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 const FREE_USER_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024;
+const FREE_USER_FILE_COUNT_QUOTA = 500;
 
 @Injectable()
 export class FilesService {
@@ -31,10 +32,27 @@ export class FilesService {
     return files.map((file) => ({ ...file, sizeBytes: file.sizeBytes.toString() }));
   }
 
+  async usage(userId: string) {
+    const aggregate = await this.prisma.file.aggregate({
+      where: { userId, deletedAt: null },
+      _sum: { sizeBytes: true },
+      _count: { id: true }
+    });
+    const usedBytes = aggregate._sum.sizeBytes ?? BigInt(0);
+
+    return {
+      usedBytes: usedBytes.toString(),
+      quotaBytes: FREE_USER_STORAGE_QUOTA_BYTES.toString(),
+      fileCount: aggregate._count.id,
+      fileCountQuota: FREE_USER_FILE_COUNT_QUOTA
+    };
+  }
+
   async create(userId: string, input: CreateFileInput) {
     const name = this.normalizeFileName(input.name);
     if (!Number.isFinite(input.sizeBytes) || input.sizeBytes < 0) throw new BadRequestException("File size is invalid");
     if (input.sizeBytes > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
+    await this.ensureFileCountQuota(userId);
     await this.ensureStorageQuota(userId, input.sizeBytes);
 
     const file = await this.prisma.file.create({
@@ -58,6 +76,7 @@ export class FilesService {
     if (file.size > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
 
     const name = this.normalizeFileName(file.originalname);
+    await this.ensureFileCountQuota(userId);
     await this.ensureStorageQuota(userId, file.size);
 
     const fileId = randomUUID();
@@ -135,6 +154,13 @@ export class FilesService {
     const nextBytes = currentBytes + BigInt(incomingBytes);
     if (nextBytes > BigInt(FREE_USER_STORAGE_QUOTA_BYTES)) {
       throw new BadRequestException("Storage quota exceeded");
+    }
+  }
+
+  private async ensureFileCountQuota(userId: string) {
+    const count = await this.prisma.file.count({ where: { userId, deletedAt: null } });
+    if (count >= FREE_USER_FILE_COUNT_QUOTA) {
+      throw new BadRequestException("File count quota exceeded");
     }
   }
 }

@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { deleteFile, listFiles, listSyncChanges, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
+import { deleteFile, getStorageUsage, listFiles, listSyncChanges, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
 import { useAuthStore } from "../store/auth-store";
 
 const PdfReader = lazy(() => import("./PdfReader"));
+const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 
 export function App() {
   const queryClient = useQueryClient();
@@ -27,6 +28,12 @@ export function App() {
     enabled: Boolean(accessToken)
   });
 
+  const storageUsageQuery = useQuery({
+    queryKey: ["storage-usage", accessToken],
+    queryFn: () => getStorageUsage(accessToken!),
+    enabled: Boolean(accessToken)
+  });
+
   const authMutation = useMutation({
     mutationFn: async (mode: "login" | "register") => (mode === "login" ? login(email, password) : register(email, password)),
     onSuccess: (session) => setSession(session.accessToken, session.refreshToken, session.user.email)
@@ -45,8 +52,11 @@ export function App() {
     mutationFn: (file: File) => uploadPdf(accessToken!, file),
     onSuccess: (file) => {
       setSelectedFile(file);
+      setFileActionError(null);
       queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
-    }
+      queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
+    },
+    onError: (error) => setFileActionError(error instanceof Error ? error.message : "Failed to upload PDF")
   });
 
   const renameFileMutation = useMutation({
@@ -65,6 +75,7 @@ export function App() {
       setSelectedFile((current) => (current?.id === file.id ? null : current));
       setFileActionError(null);
       queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+      queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
     },
     onError: (error) => setFileActionError(error instanceof Error ? error.message : "Failed to delete file")
   });
@@ -80,6 +91,7 @@ export function App() {
 
         syncCursorRef.current = changes.at(-1)?.createdAt ?? new Date().toISOString();
         queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+        queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
         const currentFile = selectedFileRef.current;
         if (currentFile && changes.some((change) => !change.fileId || change.fileId === currentFile.id)) {
           setSyncPulse((value) => value + 1);
@@ -112,6 +124,20 @@ export function App() {
   function handleDeleteFile(file: FileRecord) {
     if (!window.confirm(`Delete ${file.name}? This removes it from your library.`)) return;
     deleteFileMutation.mutate(file.id);
+  }
+
+  function handleUploadFile(file: File) {
+    if (file.type !== "application/pdf") {
+      setFileActionError("Only PDF files are supported");
+      return;
+    }
+    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+      setFileActionError("PDF file must be 200MB or smaller");
+      return;
+    }
+
+    setFileActionError(null);
+    uploadMutation.mutate(file);
   }
 
   const files = filesQuery.data ?? [];
@@ -147,9 +173,17 @@ export function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div>
+        <div className="sidebar-stack">
           <p className="eyebrow">Signed in</p>
           <h2>{userEmail}</h2>
+          {storageUsageQuery.data ? (
+            <StorageUsage
+              usedBytes={storageUsageQuery.data.usedBytes}
+              quotaBytes={storageUsageQuery.data.quotaBytes}
+              fileCount={storageUsageQuery.data.fileCount}
+              fileCountQuota={storageUsageQuery.data.fileCountQuota}
+            />
+          ) : null}
         </div>
         <button className="secondary" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>Sign out</button>
       </aside>
@@ -168,7 +202,7 @@ export function App() {
                 accept="application/pdf"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
-                  if (file) uploadMutation.mutate(file);
+                  if (file) handleUploadFile(file);
                   event.currentTarget.value = "";
                 }}
               />
@@ -240,4 +274,23 @@ function formatFileMeta(file: FileRecord) {
   const sizeLabel = Number.isFinite(size) && size > 0 ? `${(size / 1024 / 1024).toFixed(1)} MB` : "Size unknown";
   const pageLabel = file.pageCount ? `${file.pageCount} pages` : "Pages unknown";
   return `${pageLabel} · ${sizeLabel}`;
+}
+
+function StorageUsage({ usedBytes, quotaBytes, fileCount, fileCountQuota }: { usedBytes: string; quotaBytes: string; fileCount: number; fileCountQuota: number }) {
+  const used = Number(usedBytes);
+  const quota = Number(quotaBytes);
+  const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0;
+
+  return (
+    <div className="storage-usage">
+      <div className="storage-usage-bar"><span style={{ width: `${percent}%` }} /></div>
+      <p>{formatBytes(used)} of {formatBytes(quota)} used</p>
+      <p>{fileCount} of {fileCountQuota} files</p>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
+  return `${(bytes / 1024 / 1024).toFixed(bytes >= 1024 * 1024 * 1024 ? 2 : 1)} MB`;
 }

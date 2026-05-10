@@ -25,6 +25,11 @@ export class FilesController {
     return this.files.list(user.id);
   }
 
+  @Get("usage")
+  usage(@CurrentUser() user: CurrentUser) {
+    return this.files.usage(user.id);
+  }
+
   @Post()
   create(@CurrentUser() user: CurrentUser, @Body() body: CreateFileDto) {
     return this.files.create(user.id, body);

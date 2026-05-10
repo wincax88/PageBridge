@@ -136,6 +136,34 @@ label {
   padding: 1.5rem;
 }
 
+.sidebar-stack {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.storage-usage {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.storage-usage p {
+  color: #5b5f51;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.storage-usage-bar {
+  background: #d8ccb5;
+  height: 0.55rem;
+  overflow: hidden;
+}
+
+.storage-usage-bar span {
+  display: block;
+  background: #8b4b2f;
+  height: 100%;
+}
+
 .library {
   padding: clamp(1rem, 4vw, 3rem);
 }

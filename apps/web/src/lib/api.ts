@@ -16,6 +16,13 @@ export interface FileRecord {
   updatedAt: string;
 }
 
+export interface StorageUsageRecord {
+  usedBytes: string;
+  quotaBytes: string;
+  fileCount: number;
+  fileCountQuota: number;
+}
+
 export interface ReadingProgressRecord {
   id: string;
   fileId: string;
@@ -124,6 +131,10 @@ export function logout(refreshToken: string) {
 
 export function listFiles(token: string) {
   return apiRequest<FileRecord[]>("/files", {}, token);
+}
+
+export function getStorageUsage(token: string) {
+  return apiRequest<StorageUsageRecord>("/files/usage", {}, token);
 }
 
 export function listSyncChanges(token: string, since: string) {
