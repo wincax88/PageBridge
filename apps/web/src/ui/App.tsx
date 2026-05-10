@@ -1,14 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { createFile, listFiles, login, register } from "../lib/api";
+import { listFiles, login, register, uploadPdf, type FileRecord } from "../lib/api";
 import { useAuthStore } from "../store/auth-store";
+import { PdfReader } from "./PdfReader";
 
 export function App() {
   const queryClient = useQueryClient();
   const { accessToken, userEmail, setSession, clearSession } = useAuthStore();
   const [email, setEmail] = useState("demo@pagebridge.dev");
   const [password, setPassword] = useState("pagebridge123");
-  const [fileName, setFileName] = useState("sample-paper.pdf");
+  const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
 
   const filesQuery = useQuery({
     queryKey: ["files", accessToken],
@@ -21,9 +22,12 @@ export function App() {
     onSuccess: (session) => setSession(session.accessToken, session.user.email)
   });
 
-  const createFileMutation = useMutation({
-    mutationFn: () => createFile(accessToken!, fileName),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files", accessToken] })
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => uploadPdf(accessToken!, file),
+    onSuccess: (file) => {
+      setSelectedFile(file);
+      queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+    }
   });
 
   if (!accessToken) {
@@ -68,8 +72,18 @@ export function App() {
             <h1>Your PDFs</h1>
           </div>
           <div className="create-file">
-            <input value={fileName} onChange={(event) => setFileName(event.target.value)} />
-            <button onClick={() => createFileMutation.mutate()} disabled={createFileMutation.isPending}>Add placeholder</button>
+            <label className="upload-button">
+              Upload PDF
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) uploadMutation.mutate(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
           </div>
         </header>
 
@@ -78,18 +92,14 @@ export function App() {
             {filesQuery.isLoading ? <p>Loading files...</p> : null}
             {filesQuery.data?.length === 0 ? <p>No PDFs yet. Add a placeholder record or wire the upload flow next.</p> : null}
             {filesQuery.data?.map((file) => (
-              <article className="file-row" key={file.id}>
+              <article className={selectedFile?.id === file.id ? "file-row selected" : "file-row"} key={file.id} onClick={() => setSelectedFile(file)}>
                 <strong>{file.name}</strong>
                 <span>{file.pageCount ?? "Unknown"} pages</span>
               </article>
             ))}
           </section>
 
-          <section className="reader-placeholder">
-            <p className="eyebrow">Reader</p>
-            <h2>PDF.js integration point</h2>
-            <p>Next step: render selected file pages here, then mount SVG annotations over the text layer.</p>
-          </section>
+          <PdfReader token={accessToken} file={selectedFile} />
         </div>
       </section>
     </main>

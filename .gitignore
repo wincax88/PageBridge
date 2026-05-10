@@ -7,5 +7,6 @@ build/
 coverage/
 .DS_Store
 *.log
+*.tsbuildinfo
 apps/api/prisma/migrations/
 apps/web/.vite/

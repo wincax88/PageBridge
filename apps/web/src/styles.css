@@ -28,6 +28,19 @@ button {
   cursor: pointer;
 }
 
+.upload-button {
+  display: inline-grid;
+  place-items: center;
+  background: #243b2f;
+  color: #fbf8ef;
+  cursor: pointer;
+  padding: 0.75rem 1rem;
+}
+
+.upload-button input {
+  display: none;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -142,12 +155,51 @@ label {
   display: grid;
   gap: 0.25rem;
   border-bottom: 1px solid #ddd3be;
+  cursor: pointer;
   padding: 1rem 0;
+}
+
+.file-row.selected {
+  color: #8b4b2f;
 }
 
 .file-row span,
 .error {
   color: #8b4b2f;
+}
+
+.reader-active {
+  overflow: auto;
+}
+
+.reader-bar {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.page-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.canvas-stage {
+  display: grid;
+  min-height: 320px;
+  place-items: start center;
+  overflow: auto;
+  background: #d8ccb5;
+  padding: 1rem;
+}
+
+.canvas-stage canvas {
+  max-width: 100%;
+  height: auto;
+  background: white;
+  box-shadow: 0 18px 40px rgb(31 33 28 / 16%);
 }
 
 @media (max-width: 860px) {

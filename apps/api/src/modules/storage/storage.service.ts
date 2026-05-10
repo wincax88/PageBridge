@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
@@ -29,6 +29,12 @@ export class StorageService {
         ContentType: contentType
       })
     );
+  }
+
+  async getPdf(storageKey: string) {
+    const object = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: storageKey }));
+    const bytes = await object.Body?.transformToByteArray();
+    return Buffer.from(bytes ?? []);
   }
 
   buildUserFileKey(userId: string, fileId: string) {

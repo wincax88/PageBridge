@@ -60,3 +60,34 @@ export function createFile(token: string, name: string) {
     token
   );
 }
+
+export async function uploadPdf(token: string, file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${apiBaseUrl}/files/upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Upload failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<FileRecord>;
+}
+
+export async function downloadPdf(token: string, fileId: string) {
+  const response = await fetch(`${apiBaseUrl}/files/${fileId}/content`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Download failed: ${response.status}`);
+  }
+
+  return response.arrayBuffer();
+}
