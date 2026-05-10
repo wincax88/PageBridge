@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type DragEvent } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,6 +53,7 @@ export function App() {
   const [renameTarget, setRenameTarget] = useState<FileRecord | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<FileRecord | null>(null);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
 
   useEffect(() => {
     selectedFileRef.current = selectedFile;
@@ -347,6 +348,14 @@ export function App() {
     }
   }
 
+  function handleUploadDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
+    setUploadDialogOpen(false);
+    void handleUploadFile(file);
+  }
+
   async function queuePendingFileUpload(file: File) {
     await offlineDb.pendingChanges.add({
       entityType: "file",
@@ -398,8 +407,29 @@ export function App() {
     <main className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-stack">
-          <p className="eyebrow">Signed in</p>
-          <h2>{userEmail}</h2>
+          <div className="brand-block">
+            <p className="eyebrow">PageBridge</p>
+            <h2>阅迹</h2>
+            <span>PDF reading, annotation, and sync workspace</span>
+          </div>
+          <nav className="sidebar-nav" aria-label="Primary">
+            <div>
+              <p>Documents</p>
+              <a className="active" href="#library">My documents</a>
+              <a href="#recent">Recent reading</a>
+              <a href="#annotations">My annotations</a>
+              <a href="#favorites">Favorites</a>
+            </div>
+            <div>
+              <p>Manage</p>
+              <a href="#trash">Trash</a>
+              <a href="#settings">Settings</a>
+            </div>
+          </nav>
+          <div className="account-card">
+            <p className="eyebrow">Signed in</p>
+            <strong>{userEmail}</strong>
+          </div>
           {storageUsageQuery.data ? (
             <StorageUsage
               usedBytes={storageUsageQuery.data.usedBytes}
@@ -416,24 +446,11 @@ export function App() {
         <header className="toolbar">
           <div>
             <p className="eyebrow">Library</p>
-            <h1>Your PDFs</h1>
+            <h1>My documents</h1>
           </div>
+          <div className="toolbar-status"><span /> Synced</div>
           <div className="create-file">
-            <Button asChild>
-            <Label className="upload-button">
-              {uploadMutation.isPending ? "Uploading..." : "Upload PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                disabled={uploadMutation.isPending}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void handleUploadFile(file);
-                  event.currentTarget.value = "";
-                }}
-              />
-            </Label>
-            </Button>
+            <Button onClick={() => setUploadDialogOpen(true)} disabled={uploadMutation.isPending}>{uploadMutation.isPending ? "Uploading..." : "Upload PDF"}</Button>
           </div>
         </header>
 
@@ -498,6 +515,40 @@ export function App() {
           )}
         </div>
       </section>
+
+      <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
+        <DialogContent className="app-dialog upload-dialog">
+          <DialogHeader>
+            <DialogTitle>Upload PDF</DialogTitle>
+            <DialogDescription>Choose a PDF from your computer. Files up to 200MB are supported.</DialogDescription>
+          </DialogHeader>
+          <Label
+            className="upload-dropzone"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleUploadDrop}
+          >
+            <span>Drag a PDF here</span>
+            <small>or click to choose a file</small>
+            <em>.pdf only · max 200MB</em>
+            <input
+              type="file"
+              accept="application/pdf"
+              disabled={uploadMutation.isPending}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  setUploadDialogOpen(false);
+                  void handleUploadFile(file);
+                }
+                event.currentTarget.value = "";
+              }}
+            />
+          </Label>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setUploadDialogOpen(false)}>Cancel</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(renameTarget)} onOpenChange={(open) => !open && setRenameTarget(null)}>
         <DialogContent className="app-dialog">

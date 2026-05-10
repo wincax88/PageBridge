@@ -26,6 +26,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const ANNOTATION_COLORS = ["#FFE066", "#F1C46B", "#C96E3A", "#8BCB88", "#7FB3D5", "#CBA6F7"];
 type ZoomMode = "custom" | "fit_width" | "fit_page";
+type AnnotationFilter = "all" | "highlight" | "text_note";
+type ReaderSideTab = "pages" | "contents" | "bookmarks";
 
 interface PdfReaderProps {
   token: string;
@@ -129,6 +131,9 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [noteDraftInput, setNoteDraftInput] = useState<NoteDraftInput | null>(null);
   const [noteDraftText, setNoteDraftText] = useState("");
+  const [annotationFilter, setAnnotationFilter] = useState<AnnotationFilter>("all");
+  const [annotationSearch, setAnnotationSearch] = useState("");
+  const [readerSideTab, setReaderSideTab] = useState<ReaderSideTab>("contents");
 
   useEffect(() => {
     let cancelled = false;
@@ -916,6 +921,14 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const selectedAnnotation = annotations.find((annotation) => annotation.id === selectedAnnotationId) ?? null;
   const visibleNotes = visibleAnnotations.filter((annotation) => annotation.type === "text_note");
   const annotationList = [...annotations].sort((a, b) => a.page - b.page || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const filteredAnnotationList = annotationList.filter((annotation) => {
+    if (annotationFilter !== "all" && annotation.type !== annotationFilter) return false;
+    const query = annotationSearch.trim().toLowerCase();
+    if (!query) return true;
+    return [annotation.text, annotation.note, String(annotation.page), annotation.type].some((value) => value?.toLowerCase().includes(query));
+  });
+  const highlightCount = annotations.filter((annotation) => annotation.type === "highlight").length;
+  const noteCount = annotations.filter((annotation) => annotation.type === "text_note").length;
 
   useEffect(() => {
     setEditingNote(selectedAnnotation?.note ?? "");
@@ -1017,16 +1030,37 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           ))}
         </div>
       ) : null}
-      {outlineItems.length ? (
-        <div className="outline-panel">
-          <p className="eyebrow">Contents</p>
-          <div className="outline-list">
-            {outlineItems.slice(0, 80).map((item) => (
-              <Button variant="ghost" className="outline-item" key={item.id} onClick={() => void jumpToOutlineItem(item)} style={{ paddingLeft: `${0.75 + item.level * 1.1}rem` }}>
-                {item.title}
-              </Button>
-            ))}
+      {pdf ? (
+        <div className="reader-side-panel">
+          <div className="reader-side-tabs" aria-label="Reader navigation">
+            <Button variant="ghost" className={readerSideTab === "pages" ? "active" : undefined} onClick={() => setReaderSideTab("pages")}>Pages</Button>
+            <Button variant="ghost" className={readerSideTab === "contents" ? "active" : undefined} onClick={() => setReaderSideTab("contents")}>Contents</Button>
+            <Button variant="ghost" className={readerSideTab === "bookmarks" ? "active" : undefined} onClick={() => setReaderSideTab("bookmarks")}>Bookmarks</Button>
           </div>
+          {readerSideTab === "pages" ? (
+            <div className="page-mini-list">
+              {Array.from({ length: Math.min(pdf.numPages, 40) }, (_, index) => index + 1).map((page) => (
+                <Button variant="ghost" className={page === pageNumber ? "active" : undefined} key={page} onClick={() => setPageNumber(page)}>
+                  <span>Page {page}</span>
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          {readerSideTab === "contents" ? (
+            <div className="outline-panel">
+              <p className="eyebrow">Contents</p>
+              {outlineItems.length ? (
+                <div className="outline-list">
+                  {outlineItems.slice(0, 80).map((item) => (
+                    <Button variant="ghost" className="outline-item" key={item.id} onClick={() => void jumpToOutlineItem(item)} style={{ paddingLeft: `${0.75 + item.level * 1.1}rem` }}>
+                      {item.title}
+                    </Button>
+                  ))}
+                </div>
+              ) : <p className="helper-text">This PDF has no outline.</p>}
+            </div>
+          ) : null}
+          {readerSideTab === "bookmarks" ? <p className="helper-text">Bookmarks are not available yet.</p> : null}
         </div>
       ) : null}
       <div ref={canvasStageRef} className="canvas-stage">
@@ -1081,6 +1115,20 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           <p className="helper-text">Select text to highlight it. Double-click the page to add a note.</p>
         </div>
 
+        <div className="annotation-tools">
+          <div className="annotation-filters" aria-label="Filter annotations">
+            <Button variant="ghost" className={annotationFilter === "all" ? "active" : undefined} onClick={() => setAnnotationFilter("all")}>All {annotations.length}</Button>
+            <Button variant="ghost" className={annotationFilter === "highlight" ? "active" : undefined} onClick={() => setAnnotationFilter("highlight")}>Highlights {highlightCount}</Button>
+            <Button variant="ghost" className={annotationFilter === "text_note" ? "active" : undefined} onClick={() => setAnnotationFilter("text_note")}>Notes {noteCount}</Button>
+          </div>
+          <Input
+            aria-label="Search annotations"
+            placeholder="Search annotations"
+            value={annotationSearch}
+            onChange={(event) => setAnnotationSearch(event.target.value)}
+          />
+        </div>
+
         {selectedAnnotation?.type === "text_note" ? (
           <article className="selected-note">
             <strong>Selected note</strong>
@@ -1114,7 +1162,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
         ) : null}
 
         <div className="note-list">
-          {annotationList.map((annotation, index) => (
+          {filteredAnnotationList.length === 0 ? <p className="helper-text">No annotations match the current filter.</p> : null}
+          {filteredAnnotationList.map((annotation, index) => (
             <Button
               variant="ghost"
               className={selectedAnnotationId === annotation.id ? "note-item selected" : "note-item"}
