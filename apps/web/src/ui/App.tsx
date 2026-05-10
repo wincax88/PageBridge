@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useRef, useState, type DragEvent } from "react";
+import { Navigate, NavLink, matchPath, useLocation, useNavigate } from "react-router-dom";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +41,8 @@ interface PendingFileUploadPayload {
 
 export function App() {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
   const syncCursorRef = useRef(new Date().toISOString());
   const selectedFileRef = useRef<FileRecord | null>(null);
   const { accessToken, refreshToken, userEmail, setSession, clearSession } = useAuthStore();
@@ -73,7 +76,10 @@ export function App() {
 
   const authMutation = useMutation({
     mutationFn: async (mode: "login" | "register") => (mode === "login" ? login(email, password) : register(email, password)),
-    onSuccess: (session) => setSession(session.accessToken, session.refreshToken, session.user.email)
+    onSuccess: (session) => {
+      setSession(session.accessToken, session.refreshToken, session.user.email);
+      navigate("/library", { replace: true });
+    }
   });
 
   const logoutMutation = useMutation({
@@ -82,6 +88,7 @@ export function App() {
       setSelectedFile(null);
       queryClient.clear();
       clearSession();
+      navigate("/login", { replace: true });
     }
   });
 
@@ -89,6 +96,7 @@ export function App() {
     mutationFn: (file: File) => uploadPdf(accessToken!, file),
     onSuccess: (file) => {
       setSelectedFile(file);
+      navigate(`/reader/${file.id}`);
       setFileActionError(null);
       queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
       queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
@@ -246,6 +254,7 @@ export function App() {
   function applyFileDelete(fileId: string) {
     queryClient.setQueryData<FileRecord[]>(["files", accessToken], (current) => current?.filter((file) => file.id !== fileId) ?? current);
     setSelectedFile((current) => (current?.id === fileId ? null : current));
+    if (routeFileId === fileId) navigate("/library");
   }
 
   async function queuePendingFileRename(fileId: string, name: string) {
@@ -339,6 +348,7 @@ export function App() {
     try {
       const uploaded = await uploadPdf(accessToken!, file);
       setSelectedFile(uploaded);
+      navigate(`/reader/${uploaded.id}`);
       setFileActionError(null);
       queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
       queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
@@ -374,11 +384,16 @@ export function App() {
   }
 
   const files = filesQuery.data ?? [];
+  const readerMatch = matchPath("/reader/:fileId", location.pathname);
+  const routeFileId = readerMatch?.params.fileId;
+  const routeSelectedFile = routeFileId ? files.find((file) => file.id === routeFileId) ?? null : null;
+  const activeFile = routeSelectedFile ?? selectedFile;
   const filteredFiles = fileSearch.trim()
     ? files.filter((file) => file.name.toLowerCase().includes(fileSearch.trim().toLowerCase()))
     : files;
 
   if (!accessToken) {
+    if (location.pathname !== "/login") return <Navigate to="/login" replace />;
     return (
       <main className="auth-shell">
         <section className="auth-panel">
@@ -403,6 +418,8 @@ export function App() {
     );
   }
 
+  if (location.pathname === "/" || location.pathname === "/login") return <Navigate to="/library" replace />;
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -415,15 +432,15 @@ export function App() {
           <nav className="sidebar-nav" aria-label="Primary">
             <div>
               <p>Documents</p>
-              <a className="active" href="#library">My documents</a>
-              <a href="#recent">Recent reading</a>
-              <a href="#annotations">My annotations</a>
-              <a href="#favorites">Favorites</a>
+              <NavLink to="/library">My documents</NavLink>
+              <NavLink to="/recent">Recent reading</NavLink>
+              <NavLink to="/annotations">My annotations</NavLink>
+              <NavLink to="/favorites">Favorites</NavLink>
             </div>
             <div>
               <p>Manage</p>
-              <a href="#trash">Trash</a>
-              <a href="#settings">Settings</a>
+              <NavLink to="/trash">Trash</NavLink>
+              <NavLink to="/settings">Settings</NavLink>
             </div>
           </nav>
           <div className="account-card">
@@ -469,7 +486,10 @@ export function App() {
             {files.length === 0 && !filesQuery.isLoading ? <p>No PDFs yet. Upload one to start reading and annotating.</p> : null}
             {files.length > 0 && filteredFiles.length === 0 ? <p>No PDFs match “{fileSearch}”.</p> : null}
             {filteredFiles.map((file) => (
-              <article className={selectedFile?.id === file.id ? "file-row selected" : "file-row"} key={file.id} onClick={() => setSelectedFile(file)}>
+              <article className={activeFile?.id === file.id ? "file-row selected" : "file-row"} key={file.id} onClick={() => {
+                setSelectedFile(file);
+                navigate(`/reader/${file.id}`);
+              }}>
                 <div>
                   <strong>{file.name}</strong>
                   <span>{formatFileMeta(file)}</span>
@@ -502,9 +522,50 @@ export function App() {
             ))}
           </section>
 
-          {selectedFile ? (
+          {location.pathname === "/settings" ? (
+            <section className="reader-placeholder settings-page">
+              <p className="eyebrow">Settings</p>
+              <h2>Account and reading preferences</h2>
+              <div className="settings-grid">
+                <article>
+                  <strong>Account</strong>
+                  <p>{userEmail}</p>
+                </article>
+                <article>
+                  <strong>Storage</strong>
+                  <p>{storageUsageQuery.data ? `${storageUsageQuery.data.fileCount} of ${storageUsageQuery.data.fileCountQuota} files` : "Loading usage..."}</p>
+                </article>
+                <article>
+                  <strong>Sync</strong>
+                  <p>Reading progress and annotations sync automatically.</p>
+                </article>
+                <article>
+                  <strong>Shortcuts</strong>
+                  <p>Use / for search, arrow keys for pages, Ctrl +/- for zoom.</p>
+                </article>
+              </div>
+            </section>
+          ) : location.pathname === "/recent" ? (
+            <section className="reader-placeholder settings-page">
+              <p className="eyebrow">Recent</p>
+              <h2>Continue reading</h2>
+              <p>Select a PDF from your library to continue from the latest synced page.</p>
+            </section>
+          ) : location.pathname === "/annotations" ? (
+            <section className="reader-placeholder settings-page">
+              <p className="eyebrow">Annotations</p>
+              <h2>My annotations</h2>
+              <p>Open a PDF to review highlights and notes for that file.</p>
+            </section>
+          ) : location.pathname === "/favorites" || location.pathname === "/trash" ? (
+            <section className="reader-placeholder settings-page">
+              <p className="eyebrow">Coming soon</p>
+              <h2>{location.pathname === "/trash" ? "Trash" : "Favorites"}</h2>
+              <p>This page is reserved for the next product phase.</p>
+            </section>
+          ) : activeFile ? (
             <Suspense fallback={<section className="reader-placeholder"><p>Loading reader...</p></section>}>
-              <PdfReader token={accessToken} file={selectedFile} syncPulse={syncPulse} />
+              <PdfReader token={accessToken} file={activeFile} syncPulse={syncPulse} />
             </Suspense>
           ) : (
             <section className="reader-placeholder">
@@ -590,10 +651,10 @@ export function App() {
       </AlertDialog>
 
       <nav className="mobile-tabbar" aria-label="Mobile navigation">
-        <a className="active" href="#library">Docs</a>
-        <a href="#recent">Recent</a>
-        <a href="#annotations">Notes</a>
-        <a href="#settings">Me</a>
+        <NavLink to="/library">Docs</NavLink>
+        <NavLink to="/recent">Recent</NavLink>
+        <NavLink to="/annotations">Notes</NavLink>
+        <NavLink to="/settings">Me</NavLink>
       </nav>
     </main>
   );
