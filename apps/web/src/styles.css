@@ -1,0 +1,165 @@
+:root {
+  color: #1f211c;
+  background: #f3efe4;
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  background: #243b2f;
+  color: #fbf8ef;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button.secondary {
+  background: transparent;
+  color: #243b2f;
+  outline: 1px solid #b8ad98;
+}
+
+input {
+  width: 100%;
+  border: 1px solid #b8ad98;
+  background: #fffaf0;
+  color: #1f211c;
+  padding: 0.75rem;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.92rem;
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 2rem;
+}
+
+.auth-panel {
+  display: grid;
+  width: min(100%, 560px);
+  gap: 1rem;
+  border: 1px solid #b8ad98;
+  background: #fbf8ef;
+  padding: clamp(1.25rem, 4vw, 3rem);
+}
+
+.auth-panel h1,
+.library h1 {
+  margin: 0;
+  font-size: clamp(2.25rem, 6vw, 4.8rem);
+  line-height: 0.95;
+  letter-spacing: -0.06em;
+}
+
+.lede {
+  color: #5b5f51;
+  max-width: 48ch;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #8b4b2f;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.button-row,
+.create-file {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.app-shell {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: 280px 1fr;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-right: 1px solid #b8ad98;
+  background: #e9dfca;
+  padding: 1.5rem;
+}
+
+.library {
+  padding: clamp(1rem, 4vw, 3rem);
+}
+
+.toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 380px) 1fr;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.file-list,
+.reader-placeholder {
+  min-height: 420px;
+  border: 1px solid #b8ad98;
+  background: #fbf8ef;
+  padding: 1rem;
+}
+
+.file-row {
+  display: grid;
+  gap: 0.25rem;
+  border-bottom: 1px solid #ddd3be;
+  padding: 1rem 0;
+}
+
+.file-row span,
+.error {
+  color: #8b4b2f;
+}
+
+@media (max-width: 860px) {
+  .app-shell,
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar,
+  .toolbar,
+  .create-file {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

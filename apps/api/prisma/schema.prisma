@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AnnotationType {
+  highlight
+  text_note
+}
+
+enum ChangeEntityType {
+  file
+  annotation
+  reading_progress
+}
+
+enum ChangeOperation {
+  create
+  update
+  delete
+}
+
+model User {
+  id           String            @id @default(uuid())
+  email        String            @unique
+  passwordHash String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  files        File[]
+  annotations  Annotation[]
+  progress     ReadingProgress[]
+  changes      SyncChange[]
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  tokenHash String
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model File {
+  id          String            @id @default(uuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  sizeBytes   BigInt
+  mimeType    String            @default("application/pdf")
+  storageKey  String
+  checksum    String?
+  pageCount   Int?
+  deletedAt   DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  annotations Annotation[]
+  progress    ReadingProgress[]
+  changes     SyncChange[]
+
+  @@index([userId, deletedAt])
+}
+
+model Annotation {
+  id           String         @id @default(uuid())
+  fileId       String
+  file         File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId     String?
+  type         AnnotationType
+  page         Int
+  color        String         @default("#FFE066")
+  opacity      Float          @default(0.45)
+  text         String?
+  note         String?
+  quadPoints   Json?
+  rect         Json?
+  pageWidth    Float?
+  pageHeight   Float?
+  pageRotation Int            @default(0)
+  version      Int            @default(1)
+  deletedAt    DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([fileId, page, deletedAt])
+  @@index([userId, updatedAt])
+}
+
+model ReadingProgress {
+  id           String   @id @default(uuid())
+  fileId       String
+  file         File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId     String?
+  page         Int      @default(1)
+  scrollOffset Float    @default(0)
+  zoomMode     String   @default("fit_width")
+  zoomValue    Float?
+  updatedAt    DateTime @updatedAt
+
+  @@unique([fileId, userId, deviceId])
+}
+
+model SyncChange {
+  id              String           @id @default(uuid())
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileId          String?
+  file            File?            @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  entityType      ChangeEntityType
+  entityId        String
+  operation       ChangeOperation
+  baseVersion     Int?
+  nextVersion     Int?
+  clientRequestId String           @unique
+  payload         Json?
+  createdAt       DateTime         @default(now())
+
+  @@index([userId, createdAt])
+  @@index([fileId, createdAt])
+}
