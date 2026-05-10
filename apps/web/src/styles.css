@@ -399,6 +399,7 @@ kbd {
 
 .canvas-stage {
   display: grid;
+  gap: 1rem;
   min-height: 320px;
   place-items: start center;
   overflow: auto;
@@ -421,6 +422,30 @@ kbd {
 
 .page-layer canvas {
   display: block;
+}
+
+.adjacent-page {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 100%;
+  background: transparent;
+  color: #5b5f51;
+  padding: 0;
+  text-align: center;
+}
+
+.adjacent-page span {
+  font-size: 0.82rem;
+}
+
+.adjacent-page canvas {
+  display: block;
+  max-width: 100%;
+  opacity: 0.72;
+}
+
+.adjacent-page:hover canvas {
+  opacity: 0.95;
 }
 
 .text-layer {

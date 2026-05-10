@@ -294,6 +294,7 @@ export function createTextNoteAnnotation(
     rect: { x: number; y: number; width: number; height: number; coordinateSpace?: "pdf" | "viewport" };
     pageWidth: number;
     pageHeight: number;
+    color?: string;
   }
 ) {
   return apiRequest<AnnotationRecord>(
@@ -303,7 +304,7 @@ export function createTextNoteAnnotation(
       body: JSON.stringify({
         type: "text_note",
         page: input.page,
-        color: "#C96E3A",
+        color: input.color ?? "#C96E3A",
         note: input.note,
         rect: input.rect,
         pageWidth: input.pageWidth,
@@ -325,6 +326,8 @@ export function createHighlightAnnotation(
     quadPoints: { x: number; y: number; width: number; height: number; coordinateSpace?: "pdf" | "viewport" }[];
     pageWidth: number;
     pageHeight: number;
+    color?: string;
+    note?: string | null;
   }
 ) {
   return apiRequest<AnnotationRecord>(
@@ -334,8 +337,9 @@ export function createHighlightAnnotation(
       body: JSON.stringify({
         type: "highlight",
         page: input.page,
-        color: "#FFE066",
+        color: input.color ?? "#FFE066",
         text: input.text,
+        note: input.note ?? undefined,
         quadPoints: input.quadPoints,
         pageWidth: input.pageWidth,
         pageHeight: input.pageHeight,

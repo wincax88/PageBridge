@@ -15,9 +15,16 @@ export interface CachedPdfFile {
   updatedAt: string;
 }
 
+export interface CachedAnnotationList {
+  fileId: string;
+  annotations: unknown[];
+  updatedAt: string;
+}
+
 class PageBridgeDb extends Dexie {
   pendingChanges!: Table<PendingChange, number>;
   pdfFiles!: Table<CachedPdfFile, string>;
+  annotationLists!: Table<CachedAnnotationList, string>;
 
   constructor() {
     super("pagebridge");
@@ -27,6 +34,11 @@ class PageBridgeDb extends Dexie {
     this.version(2).stores({
       pendingChanges: "++id, entityType, entityId, createdAt",
       pdfFiles: "fileId, updatedAt"
+    });
+    this.version(3).stores({
+      pendingChanges: "++id, entityType, entityId, createdAt",
+      pdfFiles: "fileId, updatedAt",
+      annotationLists: "fileId, updatedAt"
     });
   }
 }
