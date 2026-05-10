@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
-import { downloadPdf, getReadingProgress, saveReadingProgress, type FileRecord } from "../lib/api";
+import {
+  createTextNoteAnnotation,
+  downloadPdf,
+  getReadingProgress,
+  listAnnotations,
+  saveReadingProgress,
+  type AnnotationRecord,
+  type FileRecord
+} from "../lib/api";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -17,6 +25,9 @@ export function PdfReader({ token, file }: PdfReaderProps) {
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "failed">("idle");
+  const [annotationStatus, setAnnotationStatus] = useState<"idle" | "saving" | "failed">("idle");
+  const [annotations, setAnnotations] = useState<AnnotationRecord[]>([]);
+  const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -28,6 +39,8 @@ export function PdfReader({ token, file }: PdfReaderProps) {
       setIsLoading(true);
       setError(null);
       setPdf(null);
+      setAnnotations([]);
+      setPageSize({ width: 0, height: 0 });
       setPageNumber(1);
       restoredFileIdRef.current = null;
 
@@ -43,6 +56,26 @@ export function PdfReader({ token, file }: PdfReaderProps) {
     }
 
     void loadPdf();
+    return () => {
+      cancelled = true;
+    };
+  }, [file, token]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAnnotations() {
+      if (!file) return;
+
+      try {
+        const records = await listAnnotations(token, file.id);
+        if (!cancelled) setAnnotations(records);
+      } catch {
+        if (!cancelled) setAnnotationStatus("failed");
+      }
+    }
+
+    void loadAnnotations();
     return () => {
       cancelled = true;
     };
@@ -86,6 +119,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
 
       canvas.width = viewport.width;
       canvas.height = viewport.height;
+      setPageSize({ width: viewport.width, height: viewport.height });
 
       const task = page.render({ canvasContext: context, viewport });
       renderTaskRef.current = task;
@@ -119,6 +153,34 @@ export function PdfReader({ token, file }: PdfReaderProps) {
     return () => window.clearTimeout(timeout);
   }, [file, pageNumber, pdf, token]);
 
+  async function handleCreateNote(event: MouseEvent<HTMLDivElement>) {
+    if (!file || !pageSize.width || !pageSize.height) return;
+
+    const target = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - target.left;
+    const y = event.clientY - target.top;
+    const note = window.prompt("Add a note for this page position");
+    if (!note?.trim()) return;
+
+    setAnnotationStatus("saving");
+    try {
+      const created = await createTextNoteAnnotation(token, file.id, {
+        page: pageNumber,
+        note: note.trim(),
+        rect: { x, y, width: 18, height: 18 },
+        pageWidth: pageSize.width,
+        pageHeight: pageSize.height
+      });
+      setAnnotations((current) => [...current, created]);
+      setAnnotationStatus("idle");
+    } catch (err) {
+      setAnnotationStatus("failed");
+      setError(err instanceof Error ? err.message : "Failed to save annotation");
+    }
+  }
+
+  const visibleAnnotations = annotations.filter((annotation) => annotation.page === pageNumber && annotation.rect);
+
   if (!file) {
     return (
       <section className="reader-placeholder">
@@ -136,6 +198,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
           <p className="eyebrow">Reader</p>
           <h2>{file.name}</h2>
           <p className="sync-line">Progress: {syncStatus === "idle" ? "ready" : syncStatus}</p>
+          <p className="sync-line">Notes: {annotationStatus === "idle" ? visibleAnnotations.length : annotationStatus}</p>
         </div>
         {pdf ? (
           <div className="page-controls">
@@ -149,7 +212,27 @@ export function PdfReader({ token, file }: PdfReaderProps) {
       {isLoading ? <p>Loading PDF...</p> : null}
       {error ? <p className="error">{error}</p> : null}
       <div className="canvas-stage">
-        <canvas ref={canvasRef} />
+        <div className="page-layer" onDoubleClick={handleCreateNote} style={{ width: pageSize.width || undefined, height: pageSize.height || undefined }}>
+          <canvas ref={canvasRef} />
+          {pageSize.width && pageSize.height ? (
+            <svg className="annotation-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-label="Page annotations">
+              {visibleAnnotations.map((annotation) => {
+                const rect = annotation.rect!;
+                const scaleX = annotation.pageWidth ? pageSize.width / annotation.pageWidth : 1;
+                const scaleY = annotation.pageHeight ? pageSize.height / annotation.pageHeight : 1;
+                const x = rect.x * scaleX;
+                const y = rect.y * scaleY;
+
+                return (
+                  <g key={annotation.id} className="annotation-marker">
+                    <circle cx={x} cy={y} r="9" />
+                    <title>{annotation.note ?? "Note"}</title>
+                  </g>
+                );
+              })}
+            </svg>
+          ) : null}
+        </div>
       </div>
     </section>
   );

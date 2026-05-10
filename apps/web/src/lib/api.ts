@@ -24,6 +24,21 @@ export interface ReadingProgressRecord {
   updatedAt: string;
 }
 
+export interface AnnotationRecord {
+  id: string;
+  fileId: string;
+  type: "highlight" | "text_note";
+  page: number;
+  color: string;
+  text: string | null;
+  note: string | null;
+  rect: { x: number; y: number; width: number; height: number } | null;
+  pageWidth: number | null;
+  pageHeight: number | null;
+  version: number;
+  updatedAt: string;
+}
+
 export async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...options,
@@ -112,6 +127,41 @@ export function saveReadingProgress(token: string, fileId: string, page: number)
     {
       method: "PUT",
       body: JSON.stringify({ deviceId: "web", page, scrollOffset: 0, zoomMode: "fit_width" })
+    },
+    token
+  );
+}
+
+export function listAnnotations(token: string, fileId: string) {
+  return apiRequest<AnnotationRecord[]>(`/files/${fileId}/annotations`, {}, token);
+}
+
+export function createTextNoteAnnotation(
+  token: string,
+  fileId: string,
+  input: {
+    page: number;
+    note: string;
+    rect: { x: number; y: number; width: number; height: number };
+    pageWidth: number;
+    pageHeight: number;
+  }
+) {
+  return apiRequest<AnnotationRecord>(
+    `/files/${fileId}/annotations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        type: "text_note",
+        page: input.page,
+        color: "#C96E3A",
+        note: input.note,
+        rect: input.rect,
+        pageWidth: input.pageWidth,
+        pageHeight: input.pageHeight,
+        pageRotation: 0,
+        deviceId: "web"
+      })
     },
     token
   );
