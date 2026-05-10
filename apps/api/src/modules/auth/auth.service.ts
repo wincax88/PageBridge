@@ -4,6 +4,7 @@ import { JwtService } from "@nestjs/jwt";
 import { compare, hash } from "bcryptjs";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
+import { RedisService } from "../redis/redis.service";
 
 interface RefreshPayload {
   sub: string;
@@ -16,12 +17,14 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    private readonly redis: RedisService
   ) {}
 
   async register(email: string, password: string) {
     const normalizedEmail = this.normalizeEmail(email);
     this.validatePassword(password);
+    await this.redis.limit(`rate:auth:register:${normalizedEmail}`, 5, 60 * 60);
     const existing = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (existing) throw new ConflictException("Email is already registered");
 
@@ -35,6 +38,7 @@ export class AuthService {
   async login(email: string, password: string) {
     const normalizedEmail = this.normalizeEmail(email);
     if (!password) throw new UnauthorizedException("Invalid email or password");
+    await this.redis.limit(`rate:auth:login:${normalizedEmail}`, 10, 15 * 60);
 
     const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (!user || !(await compare(password, user.passwordHash))) {

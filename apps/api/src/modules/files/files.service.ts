@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
+import { RedisService } from "../redis/redis.service";
 import { StorageService } from "../storage/storage.service";
 
 interface CreateFileInput {
@@ -10,10 +11,14 @@ interface CreateFileInput {
   pageCount?: number;
 }
 
+const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
+const FREE_USER_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024;
+
 @Injectable()
 export class FilesService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
     private readonly storage: StorageService
   ) {}
 
@@ -29,6 +34,8 @@ export class FilesService {
   async create(userId: string, input: CreateFileInput) {
     const name = this.normalizeFileName(input.name);
     if (!Number.isFinite(input.sizeBytes) || input.sizeBytes < 0) throw new BadRequestException("File size is invalid");
+    if (input.sizeBytes > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
+    await this.ensureStorageQuota(userId, input.sizeBytes);
 
     const file = await this.prisma.file.create({
       data: {
@@ -44,11 +51,14 @@ export class FilesService {
   }
 
   async upload(userId: string, file: Express.Multer.File) {
+    await this.redis.limit(`rate:upload:${userId}`, 30, 60 * 60);
     if (!file) throw new BadRequestException("PDF file is required");
     if (file.mimetype !== "application/pdf") throw new BadRequestException("Only PDF files are supported");
     if (file.size <= 0) throw new BadRequestException("PDF file is empty");
+    if (file.size > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
 
     const name = this.normalizeFileName(file.originalname);
+    await this.ensureStorageQuota(userId, file.size);
 
     const fileId = randomUUID();
     const storageKey = this.storage.buildUserFileKey(userId, fileId);
@@ -114,5 +124,17 @@ export class FilesService {
     if (!normalizedName) throw new BadRequestException("File name is required");
     if (normalizedName.length > 255) throw new BadRequestException("File name is too long");
     return normalizedName;
+  }
+
+  private async ensureStorageQuota(userId: string, incomingBytes: number) {
+    const aggregate = await this.prisma.file.aggregate({
+      where: { userId, deletedAt: null },
+      _sum: { sizeBytes: true }
+    });
+    const currentBytes = aggregate._sum.sizeBytes ?? BigInt(0);
+    const nextBytes = currentBytes + BigInt(incomingBytes);
+    if (nextBytes > BigInt(FREE_USER_STORAGE_QUOTA_BYTES)) {
+      throw new BadRequestException("Storage quota exceeded");
+    }
   }
 }

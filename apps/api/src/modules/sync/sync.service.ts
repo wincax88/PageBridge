@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { RedisService } from "../redis/redis.service";
 
 type ChangeEntityType = "file" | "annotation" | "reading_progress";
 type ChangeOperation = "create" | "update" | "delete";
@@ -17,7 +18,10 @@ interface SubmitChangeInput {
 
 @Injectable()
 export class SyncService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService
+  ) {}
 
   changes(userId: string, since?: string, fileId?: string) {
     return this.prisma.syncChange.findMany({
@@ -32,6 +36,7 @@ export class SyncService {
   }
 
   async submit(userId: string, input: SubmitChangeInput) {
+    await this.redis.limit(`rate:sync:submit:${userId}`, 600, 60);
     const existing = await this.prisma.syncChange.findUnique({ where: { clientRequestId: input.clientRequestId } });
     if (existing) return existing;
 
