@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { listFiles, login, register, uploadPdf, type FileRecord } from "../lib/api";
+import { deleteFile, listFiles, login, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
 import { useAuthStore } from "../store/auth-store";
 import { PdfReader } from "./PdfReader";
 
@@ -10,6 +10,8 @@ export function App() {
   const [email, setEmail] = useState("demo@pagebridge.dev");
   const [password, setPassword] = useState("pagebridge123");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
+  const [fileActionError, setFileActionError] = useState<string | null>(null);
+  const [fileSearch, setFileSearch] = useState("");
 
   const filesQuery = useQuery({
     queryKey: ["files", accessToken],
@@ -29,6 +31,42 @@ export function App() {
       queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
     }
   });
+
+  const renameFileMutation = useMutation({
+    mutationFn: ({ fileId, name }: { fileId: string; name: string }) => renameFile(accessToken!, fileId, name),
+    onSuccess: (file) => {
+      setSelectedFile((current) => (current?.id === file.id ? file : current));
+      setFileActionError(null);
+      queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+    },
+    onError: (error) => setFileActionError(error instanceof Error ? error.message : "Failed to rename file")
+  });
+
+  const deleteFileMutation = useMutation({
+    mutationFn: (fileId: string) => deleteFile(accessToken!, fileId),
+    onSuccess: (file) => {
+      setSelectedFile((current) => (current?.id === file.id ? null : current));
+      setFileActionError(null);
+      queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+    },
+    onError: (error) => setFileActionError(error instanceof Error ? error.message : "Failed to delete file")
+  });
+
+  function handleRenameFile(file: FileRecord) {
+    const name = window.prompt("Rename PDF", file.name)?.trim();
+    if (!name || name === file.name) return;
+    renameFileMutation.mutate({ fileId: file.id, name });
+  }
+
+  function handleDeleteFile(file: FileRecord) {
+    if (!window.confirm(`Delete ${file.name}? This removes it from your library.`)) return;
+    deleteFileMutation.mutate(file.id);
+  }
+
+  const files = filesQuery.data ?? [];
+  const filteredFiles = fileSearch.trim()
+    ? files.filter((file) => file.name.toLowerCase().includes(fileSearch.trim().toLowerCase()))
+    : files;
 
   if (!accessToken) {
     return (
@@ -89,12 +127,42 @@ export function App() {
 
         <div className="content-grid">
           <section className="file-list">
+            <label className="file-search">
+              Search files
+              <input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="Filter by PDF name" />
+            </label>
             {filesQuery.isLoading ? <p>Loading files...</p> : null}
-            {filesQuery.data?.length === 0 ? <p>No PDFs yet. Add a placeholder record or wire the upload flow next.</p> : null}
-            {filesQuery.data?.map((file) => (
+            {fileActionError ? <p className="error">{fileActionError}</p> : null}
+            {files.length === 0 && !filesQuery.isLoading ? <p>No PDFs yet. Upload one to start reading and annotating.</p> : null}
+            {files.length > 0 && filteredFiles.length === 0 ? <p>No PDFs match “{fileSearch}”.</p> : null}
+            {filteredFiles.map((file) => (
               <article className={selectedFile?.id === file.id ? "file-row selected" : "file-row"} key={file.id} onClick={() => setSelectedFile(file)}>
-                <strong>{file.name}</strong>
-                <span>{file.pageCount ?? "Unknown"} pages</span>
+                <div>
+                  <strong>{file.name}</strong>
+                  <span>{formatFileMeta(file)}</span>
+                </div>
+                <div className="file-actions">
+                  <button
+                    className="text-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleRenameFile(file);
+                    }}
+                    disabled={renameFileMutation.isPending || deleteFileMutation.isPending}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    className="text-button danger"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleDeleteFile(file);
+                    }}
+                    disabled={renameFileMutation.isPending || deleteFileMutation.isPending}
+                  >
+                    Delete
+                  </button>
+                </div>
               </article>
             ))}
           </section>
@@ -104,4 +172,11 @@ export function App() {
       </section>
     </main>
   );
+}
+
+function formatFileMeta(file: FileRecord) {
+  const size = Number(file.sizeBytes);
+  const sizeLabel = Number.isFinite(size) && size > 0 ? `${(size / 1024 / 1024).toFixed(1)} MB` : "Size unknown";
+  const pageLabel = file.pageCount ? `${file.pageCount} pages` : "Pages unknown";
+  return `${pageLabel} · ${sizeLabel}`;
 }

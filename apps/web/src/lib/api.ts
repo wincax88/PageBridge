@@ -104,6 +104,27 @@ export async function uploadPdf(token: string, file: File) {
   return response.json() as Promise<FileRecord>;
 }
 
+export function renameFile(token: string, fileId: string, name: string) {
+  return apiRequest<FileRecord>(
+    `/files/${fileId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ name })
+    },
+    token
+  );
+}
+
+export function deleteFile(token: string, fileId: string) {
+  return apiRequest<FileRecord>(
+    `/files/${fileId}`,
+    {
+      method: "DELETE"
+    },
+    token
+  );
+}
+
 export async function downloadPdf(token: string, fileId: string) {
   const response = await fetch(`${apiBaseUrl}/files/${fileId}/content`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -121,12 +142,12 @@ export function getReadingProgress(token: string, fileId: string) {
   return apiRequest<ReadingProgressRecord | null>(`/files/${fileId}/progress?deviceId=web`, {}, token);
 }
 
-export function saveReadingProgress(token: string, fileId: string, page: number) {
+export function saveReadingProgress(token: string, fileId: string, page: number, zoomValue: number) {
   return apiRequest<ReadingProgressRecord>(
     `/files/${fileId}/progress`,
     {
       method: "PUT",
-      body: JSON.stringify({ deviceId: "web", page, scrollOffset: 0, zoomMode: "fit_width" })
+      body: JSON.stringify({ deviceId: "web", page, scrollOffset: 0, zoomMode: "custom", zoomValue })
     },
     token
   );
@@ -172,6 +193,17 @@ export function deleteAnnotation(token: string, fileId: string, annotationId: st
     `/files/${fileId}/annotations/${annotationId}`,
     {
       method: "DELETE"
+    },
+    token
+  );
+}
+
+export function updateAnnotationNote(token: string, fileId: string, annotationId: string, note: string) {
+  return apiRequest<AnnotationRecord>(
+    `/files/${fileId}/annotations/${annotationId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ note })
     },
     token
   );
