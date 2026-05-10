@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -32,6 +32,7 @@ export class AnnotationsService {
 
   async create(userId: string, fileId: string, input: AnnotationInput) {
     await this.ensureFile(userId, fileId);
+    this.validateAnnotationInput(input);
     const annotation = await this.prisma.annotation.create({
       data: {
         userId,
@@ -55,6 +56,7 @@ export class AnnotationsService {
 
   async update(userId: string, fileId: string, annotationId: string, input: Partial<AnnotationInput>) {
     await this.ensureAnnotation(userId, fileId, annotationId);
+    this.validateAnnotationInput(input, true);
     const annotation = await this.prisma.annotation.update({
       where: { id: annotationId },
       data: { ...input, version: { increment: 1 } } as never
@@ -105,5 +107,14 @@ export class AnnotationsService {
     const file = await this.prisma.file.findFirst({ where: { id: fileId, userId, deletedAt: null } });
     if (!file) throw new NotFoundException("File not found");
     return file;
+  }
+
+  private validateAnnotationInput(input: Partial<AnnotationInput>, partial = false) {
+    if (!partial && input.type !== "highlight" && input.type !== "text_note") throw new BadRequestException("Annotation type is invalid");
+    if (input.page !== undefined && (!Number.isInteger(input.page) || input.page < 1)) throw new BadRequestException("Annotation page is invalid");
+    if (input.note !== undefined && input.note.length > 10000) throw new BadRequestException("Annotation note is too long");
+    if (input.color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(input.color)) throw new BadRequestException("Annotation color is invalid");
+    if (input.pageWidth !== undefined && input.pageWidth <= 0) throw new BadRequestException("Page width is invalid");
+    if (input.pageHeight !== undefined && input.pageHeight <= 0) throw new BadRequestException("Page height is invalid");
   }
 }

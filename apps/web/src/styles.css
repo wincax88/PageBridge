@@ -209,6 +209,21 @@ label {
   font-size: 0.85rem;
 }
 
+.shortcut-line {
+  color: #5b5f51;
+  font-size: 0.78rem;
+  margin: 0.45rem 0 0;
+}
+
+kbd {
+  border: 1px solid #c9bea8;
+  background: #fffaf0;
+  color: #243b2f;
+  font-family: inherit;
+  font-size: 0.75em;
+  padding: 0.08rem 0.28rem;
+}
+
 .file-actions {
   display: flex;
   flex-wrap: wrap;

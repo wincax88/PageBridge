@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -21,6 +21,7 @@ export class ReadingProgressService {
 
   async save(userId: string, fileId: string, input: SaveProgressInput) {
     await this.ensureFile(userId, fileId);
+    this.validateProgressInput(input);
     const deviceId = input.deviceId ?? "web";
     const progress = await this.prisma.readingProgress.upsert({
       where: { fileId_userId_deviceId: { fileId, userId, deviceId } },
@@ -64,5 +65,11 @@ export class ReadingProgressService {
     const file = await this.prisma.file.findFirst({ where: { id: fileId, userId, deletedAt: null } });
     if (!file) throw new NotFoundException("File not found");
     return file;
+  }
+
+  private validateProgressInput(input: SaveProgressInput) {
+    if (!Number.isInteger(input.page) || input.page < 1) throw new BadRequestException("Reading page is invalid");
+    if (input.scrollOffset !== undefined && input.scrollOffset < 0) throw new BadRequestException("Scroll offset is invalid");
+    if (input.zoomValue !== undefined && (input.zoomValue < 0.25 || input.zoomValue > 5)) throw new BadRequestException("Zoom value is invalid");
   }
 }

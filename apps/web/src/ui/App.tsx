@@ -1,17 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { deleteFile, listFiles, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { deleteFile, listFiles, listSyncChanges, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
 import { useAuthStore } from "../store/auth-store";
-import { PdfReader } from "./PdfReader";
+
+const PdfReader = lazy(() => import("./PdfReader"));
 
 export function App() {
   const queryClient = useQueryClient();
+  const syncCursorRef = useRef(new Date().toISOString());
+  const selectedFileRef = useRef<FileRecord | null>(null);
   const { accessToken, refreshToken, userEmail, setSession, clearSession } = useAuthStore();
   const [email, setEmail] = useState("demo@pagebridge.dev");
   const [password, setPassword] = useState("pagebridge123");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
   const [fileSearch, setFileSearch] = useState("");
+  const [syncPulse, setSyncPulse] = useState(0);
+
+  useEffect(() => {
+    selectedFileRef.current = selectedFile;
+  }, [selectedFile]);
 
   const filesQuery = useQuery({
     queryKey: ["files", accessToken],
@@ -60,6 +68,40 @@ export function App() {
     },
     onError: (error) => setFileActionError(error instanceof Error ? error.message : "Failed to delete file")
   });
+
+  useEffect(() => {
+    if (!accessToken) return;
+
+    let cancelled = false;
+    const pollChanges = async () => {
+      try {
+        const changes = await listSyncChanges(accessToken, syncCursorRef.current);
+        if (cancelled || changes.length === 0) return;
+
+        syncCursorRef.current = changes.at(-1)?.createdAt ?? new Date().toISOString();
+        queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+        const currentFile = selectedFileRef.current;
+        if (currentFile && changes.some((change) => !change.fileId || change.fileId === currentFile.id)) {
+          setSyncPulse((value) => value + 1);
+        }
+      } catch {
+        // Sync polling is opportunistic; direct user actions still surface errors.
+      }
+    };
+
+    const interval = window.setInterval(() => void pollChanges(), 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [accessToken, queryClient]);
+
+  useEffect(() => {
+    if (!selectedFile || filesQuery.isLoading || !filesQuery.data) return;
+
+    const freshFile = filesQuery.data.find((file) => file.id === selectedFile.id);
+    setSelectedFile(freshFile ?? null);
+  }, [filesQuery.data, filesQuery.isLoading, selectedFile]);
 
   function handleRenameFile(file: FileRecord) {
     const name = window.prompt("Rename PDF", file.name)?.trim();
@@ -176,7 +218,17 @@ export function App() {
             ))}
           </section>
 
-          <PdfReader token={accessToken} file={selectedFile} />
+          {selectedFile ? (
+            <Suspense fallback={<section className="reader-placeholder"><p>Loading reader...</p></section>}>
+              <PdfReader token={accessToken} file={selectedFile} syncPulse={syncPulse} />
+            </Suspense>
+          ) : (
+            <section className="reader-placeholder">
+              <p className="eyebrow">Reader</p>
+              <h2>Select a PDF</h2>
+              <p>Choose a file from your library to load the PDF reader.</p>
+            </section>
+          )}
         </div>
       </section>
     </main>

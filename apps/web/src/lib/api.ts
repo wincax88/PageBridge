@@ -41,19 +41,17 @@ export interface AnnotationRecord {
   updatedAt: string;
 }
 
+export interface SyncChangeRecord {
+  id: string;
+  fileId: string | null;
+  entityType: "file" | "annotation" | "reading_progress";
+  entityId: string;
+  operation: "create" | "update" | "delete";
+  createdAt: string;
+}
+
 export async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
-  const response = await fetchJson(path, options, token);
-
-  if (response.status === 401 && token) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
-      const retry = await fetchJson(path, options, refreshed.accessToken);
-      if (retry.ok) return retry.json() as Promise<T>;
-
-      const retryMessage = await retry.text();
-      throw new Error(retryMessage || `Request failed: ${retry.status}`);
-    }
-  }
+  const response = await fetchWithAuthRetry(path, options, token, true);
 
   if (!response.ok) {
     const message = await response.text();
@@ -63,11 +61,21 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, tok
   return response.json() as Promise<T>;
 }
 
-function fetchJson(path: string, options: RequestInit = {}, token?: string) {
+async function fetchWithAuthRetry(path: string, options: RequestInit = {}, token?: string, isJson = false) {
+  const response = await fetchApi(path, options, token, isJson);
+  if (response.status !== 401 || !token) return response;
+
+  const refreshed = await refreshAccessToken();
+  if (!refreshed) return response;
+
+  return fetchApi(path, options, refreshed.accessToken, isJson);
+}
+
+function fetchApi(path: string, options: RequestInit = {}, token?: string, isJson = false) {
   return fetch(`${apiBaseUrl}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(isJson ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers
     }
@@ -78,10 +86,10 @@ async function refreshAccessToken() {
   const refreshToken = useAuthStore.getState().refreshToken;
   if (!refreshToken) return null;
 
-  const response = await fetchJson("/auth/refresh", {
+  const response = await fetchApi("/auth/refresh", {
     method: "POST",
     body: JSON.stringify({ refreshToken })
-  });
+  }, undefined, true);
 
   if (!response.ok) {
     useAuthStore.getState().clearSession();
@@ -118,6 +126,10 @@ export function listFiles(token: string) {
   return apiRequest<FileRecord[]>("/files", {}, token);
 }
 
+export function listSyncChanges(token: string, since: string) {
+  return apiRequest<SyncChangeRecord[]>(`/sync/changes?since=${encodeURIComponent(since)}`, {}, token);
+}
+
 export function createFile(token: string, name: string) {
   return apiRequest<FileRecord>(
     "/files",
@@ -133,11 +145,10 @@ export async function uploadPdf(token: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetch(`${apiBaseUrl}/files/upload`, {
+  const response = await fetchWithAuthRetry("/files/upload", {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
     body: formData
-  });
+  }, token);
 
   if (!response.ok) {
     const message = await response.text();
@@ -169,9 +180,7 @@ export function deleteFile(token: string, fileId: string) {
 }
 
 export async function downloadPdf(token: string, fileId: string) {
-  const response = await fetch(`${apiBaseUrl}/files/${fileId}/content`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const response = await fetchWithAuthRetry(`/files/${fileId}/content`, {}, token);
 
   if (!response.ok) {
     const message = await response.text();

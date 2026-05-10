@@ -18,6 +18,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 interface PdfReaderProps {
   token: string;
   file: FileRecord | null;
+  syncPulse: number;
 }
 
 interface SearchResult {
@@ -25,8 +26,9 @@ interface SearchResult {
   preview: string;
 }
 
-export function PdfReader({ token, file }: PdfReaderProps) {
+export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const renderTaskRef = useRef<pdfjs.RenderTask | null>(null);
   const restoredFileIdRef = useRef<string | null>(null);
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null);
@@ -80,7 +82,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
     return () => {
       cancelled = true;
     };
-  }, [file, token]);
+  }, [file, syncPulse, token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -256,6 +258,38 @@ export function PdfReader({ token, file }: PdfReaderProps) {
     setScale((current) => Number(Math.min(2.5, Math.max(0.75, current + delta)).toFixed(2)));
   }
 
+  useEffect(() => {
+    if (!pdf) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
+
+      if (event.key === "/" && !isTyping) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (isTyping) return;
+
+      if (event.key === "ArrowLeft") {
+        setPageNumber((page) => Math.max(1, page - 1));
+      } else if (event.key === "ArrowRight") {
+        setPageNumber((page) => Math.min(pdf.numPages, page + 1));
+      } else if ((event.ctrlKey || event.metaKey) && (event.key === "+" || event.key === "=")) {
+        event.preventDefault();
+        changeScale(0.15);
+      } else if ((event.ctrlKey || event.metaKey) && event.key === "-") {
+        event.preventDefault();
+        changeScale(-0.15);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [pdf]);
+
   async function searchDocument() {
     if (!pdf) return;
 
@@ -317,6 +351,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
           <h2>{file.name}</h2>
           <p className="sync-line">Progress: {syncStatus === "idle" ? "ready" : syncStatus}</p>
           <p className="sync-line">Notes: {annotationStatus === "idle" ? visibleAnnotations.length : annotationStatus}</p>
+          <p className="shortcut-line"><kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>/</kbd> search · <kbd>Ctrl</kbd> + <kbd>+/-</kbd> zoom</p>
         </div>
         {pdf ? (
           <div className="page-controls">
@@ -358,6 +393,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
           }}
         >
           <input
+            ref={searchInputRef}
             aria-label="Search PDF text"
             placeholder="Search text in this PDF"
             value={searchQuery}

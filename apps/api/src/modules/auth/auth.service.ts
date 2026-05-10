@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { compare, hash } from "bcryptjs";
@@ -20,7 +20,8 @@ export class AuthService {
   ) {}
 
   async register(email: string, password: string) {
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = this.normalizeEmail(email);
+    this.validatePassword(password);
     const existing = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (existing) throw new ConflictException("Email is already registered");
 
@@ -32,7 +33,10 @@ export class AuthService {
   }
 
   async login(email: string, password: string) {
-    const user = await this.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+    const normalizedEmail = this.normalizeEmail(email);
+    if (!password) throw new UnauthorizedException("Invalid email or password");
+
+    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (!user || !(await compare(password, user.passwordHash))) {
       throw new UnauthorizedException("Invalid email or password");
     }
@@ -41,6 +45,7 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string) {
+    if (!refreshToken) throw new UnauthorizedException("Invalid refresh token");
     try {
       const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
         secret: this.config.get<string>("JWT_REFRESH_SECRET") ?? "dev-refresh-secret"
@@ -58,6 +63,7 @@ export class AuthService {
   }
 
   async logout(refreshToken: string) {
+    if (!refreshToken) return { ok: true };
     try {
       const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
         secret: this.config.get<string>("JWT_REFRESH_SECRET") ?? "dev-refresh-secret"
@@ -98,5 +104,19 @@ export class AuthService {
       }),
       refreshToken
     };
+  }
+
+  private normalizeEmail(email: string) {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      throw new BadRequestException("A valid email is required");
+    }
+    return normalizedEmail;
+  }
+
+  private validatePassword(password: string) {
+    if (!password || password.length < 8) {
+      throw new BadRequestException("Password must be at least 8 characters");
+    }
   }
 }

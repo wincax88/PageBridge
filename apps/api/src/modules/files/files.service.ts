@@ -27,10 +27,13 @@ export class FilesService {
   }
 
   async create(userId: string, input: CreateFileInput) {
+    const name = this.normalizeFileName(input.name);
+    if (!Number.isFinite(input.sizeBytes) || input.sizeBytes < 0) throw new BadRequestException("File size is invalid");
+
     const file = await this.prisma.file.create({
       data: {
         userId,
-        name: input.name,
+        name,
         sizeBytes: input.sizeBytes,
         pageCount: input.pageCount,
         storageKey: input.storageKey ?? `users/${userId}/pending/${randomUUID()}.pdf`
@@ -43,6 +46,9 @@ export class FilesService {
   async upload(userId: string, file: Express.Multer.File) {
     if (!file) throw new BadRequestException("PDF file is required");
     if (file.mimetype !== "application/pdf") throw new BadRequestException("Only PDF files are supported");
+    if (file.size <= 0) throw new BadRequestException("PDF file is empty");
+
+    const name = this.normalizeFileName(file.originalname);
 
     const fileId = randomUUID();
     const storageKey = this.storage.buildUserFileKey(userId, fileId);
@@ -52,7 +58,7 @@ export class FilesService {
       data: {
         id: fileId,
         userId,
-        name: file.originalname,
+        name,
         sizeBytes: BigInt(file.size),
         mimeType: file.mimetype,
         storageKey
@@ -69,9 +75,10 @@ export class FilesService {
   }
 
   async rename(userId: string, fileId: string, name: string) {
+    const normalizedName = this.normalizeFileName(name);
     await this.ensureFile(userId, fileId);
-    const file = await this.prisma.file.update({ where: { id: fileId }, data: { name } });
-    await this.recordChange(userId, fileId, "update", fileId, { name });
+    const file = await this.prisma.file.update({ where: { id: fileId }, data: { name: normalizedName } });
+    await this.recordChange(userId, fileId, "update", fileId, { name: normalizedName });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
@@ -100,5 +107,12 @@ export class FilesService {
     const file = await this.prisma.file.findFirst({ where: { id: fileId, userId, deletedAt: null } });
     if (!file) throw new NotFoundException("File not found");
     return file;
+  }
+
+  private normalizeFileName(name: string) {
+    const normalizedName = name?.trim();
+    if (!normalizedName) throw new BadRequestException("File name is required");
+    if (normalizedName.length > 255) throw new BadRequestException("File name is too long");
+    return normalizedName;
   }
 }
