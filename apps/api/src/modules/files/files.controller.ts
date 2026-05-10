@@ -1,33 +1,55 @@
 import { Body, Controller, Delete, Get, Header, Param, Patch, Post, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import { IsInt, IsNumber, IsOptional, IsString } from "class-validator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { FilesService } from "./files.service";
 
 class CreateFileDto {
+  @IsString()
   name!: string;
+
+  @IsNumber()
   sizeBytes!: number;
+
+  @IsOptional()
+  @IsString()
   storageKey?: string;
+
+  @IsOptional()
+  @IsInt()
   pageCount?: number;
 }
 
 class RenameFileDto {
+  @IsString()
   name!: string;
 }
 
 class UpdatePageCountDto {
+  @IsInt()
   pageCount!: number;
 }
 
 class CreateUploadTargetDto {
+  @IsString()
   name!: string;
+
+  @IsNumber()
   sizeBytes!: number;
 }
 
 class CompleteUploadDto {
+  @IsString()
   fileId!: string;
+
+  @IsString()
   name!: string;
+
+  @IsNumber()
   sizeBytes!: number;
+
+  @IsString()
   storageKey!: string;
 }
 

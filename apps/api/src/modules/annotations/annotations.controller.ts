@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Allow, IsIn, IsInt, IsNumber, IsOptional, IsString } from "class-validator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { AnnotationsService } from "./annotations.service";
@@ -6,17 +7,52 @@ import { AnnotationsService } from "./annotations.service";
 type AnnotationType = "highlight" | "text_note";
 
 class UpsertAnnotationDto {
+  @IsOptional()
+  @IsIn(["highlight", "text_note"])
   type!: AnnotationType;
+
+  @IsOptional()
+  @IsInt()
   page!: number;
+
+  @IsOptional()
+  @IsString()
   color?: string;
+
+  @IsOptional()
+  @IsString()
   text?: string;
+
+  @IsOptional()
+  @IsString()
   note?: string;
+
+  @IsOptional()
+  @Allow()
   quadPoints?: unknown;
+
+  @IsOptional()
+  @Allow()
   rect?: unknown;
+
+  @IsOptional()
+  @IsNumber()
   pageWidth?: number;
+
+  @IsOptional()
+  @IsNumber()
   pageHeight?: number;
+
+  @IsOptional()
+  @IsInt()
   pageRotation?: number;
+
+  @IsOptional()
+  @IsString()
   deviceId?: string;
+
+  @IsOptional()
+  @IsInt()
   baseVersion?: number;
 }
 

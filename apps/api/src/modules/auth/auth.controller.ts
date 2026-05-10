@@ -1,13 +1,20 @@
 import { Body, Controller, Post, Req, Res } from "@nestjs/common";
+import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
 import type { Request, Response } from "express";
 import { AuthService } from "./auth.service";
 
 class AuthDto {
+  @IsEmail()
   email!: string;
+
+  @IsString()
+  @MinLength(8)
   password!: string;
 }
 
 class RefreshTokenDto {
+  @IsOptional()
+  @IsString()
   refreshToken?: string;
 }
 

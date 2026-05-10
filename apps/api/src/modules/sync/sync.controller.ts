@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
+import { Allow, IsIn, IsInt, IsOptional, IsString } from "class-validator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { SyncService } from "./sync.service";
@@ -7,13 +8,32 @@ type ChangeEntityType = "file" | "annotation" | "reading_progress";
 type ChangeOperation = "create" | "update" | "delete";
 
 class SubmitChangeDto {
+  @IsOptional()
+  @IsString()
   fileId?: string;
+
+  @IsIn(["file", "annotation", "reading_progress"])
   entityType!: ChangeEntityType;
+
+  @IsString()
   entityId!: string;
+
+  @IsIn(["create", "update", "delete"])
   operation!: ChangeOperation;
+
+  @IsOptional()
+  @IsInt()
   baseVersion?: number;
+
+  @IsOptional()
+  @IsInt()
   nextVersion?: number;
+
+  @IsString()
   clientRequestId!: string;
+
+  @IsOptional()
+  @Allow()
   payload?: unknown;
 }
 
