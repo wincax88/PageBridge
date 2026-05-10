@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
-import { downloadPdf, type FileRecord } from "../lib/api";
+import { downloadPdf, getReadingProgress, saveReadingProgress, type FileRecord } from "../lib/api";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -13,8 +13,10 @@ interface PdfReaderProps {
 export function PdfReader({ token, file }: PdfReaderProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderTaskRef = useRef<pdfjs.RenderTask | null>(null);
+  const restoredFileIdRef = useRef<string | null>(null);
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "failed">("idle");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -27,6 +29,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
       setError(null);
       setPdf(null);
       setPageNumber(1);
+      restoredFileIdRef.current = null;
 
       try {
         const data = await downloadPdf(token, file.id);
@@ -44,6 +47,29 @@ export function PdfReader({ token, file }: PdfReaderProps) {
       cancelled = true;
     };
   }, [file, token]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreProgress() {
+      if (!file || !pdf || restoredFileIdRef.current === file.id) return;
+      restoredFileIdRef.current = file.id;
+
+      try {
+        const progress = await getReadingProgress(token, file.id);
+        if (!cancelled && progress?.page) {
+          setPageNumber(Math.min(Math.max(1, progress.page), pdf.numPages));
+        }
+      } catch {
+        if (!cancelled) setSyncStatus("failed");
+      }
+    }
+
+    void restoreProgress();
+    return () => {
+      cancelled = true;
+    };
+  }, [file, pdf, token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +106,19 @@ export function PdfReader({ token, file }: PdfReaderProps) {
     };
   }, [pageNumber, pdf]);
 
+  useEffect(() => {
+    if (!file || !pdf || restoredFileIdRef.current !== file.id) return;
+
+    const timeout = window.setTimeout(() => {
+      setSyncStatus("syncing");
+      saveReadingProgress(token, file.id, pageNumber)
+        .then(() => setSyncStatus("synced"))
+        .catch(() => setSyncStatus("failed"));
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [file, pageNumber, pdf, token]);
+
   if (!file) {
     return (
       <section className="reader-placeholder">
@@ -96,6 +135,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
         <div>
           <p className="eyebrow">Reader</p>
           <h2>{file.name}</h2>
+          <p className="sync-line">Progress: {syncStatus === "idle" ? "ready" : syncStatus}</p>
         </div>
         {pdf ? (
           <div className="page-controls">

@@ -164,8 +164,14 @@ label {
 }
 
 .file-row span,
-.error {
+.error,
+.sync-line {
   color: #8b4b2f;
+}
+
+.sync-line {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
 }
 
 .reader-active {

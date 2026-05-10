@@ -14,6 +14,16 @@ export interface FileRecord {
   updatedAt: string;
 }
 
+export interface ReadingProgressRecord {
+  id: string;
+  fileId: string;
+  page: number;
+  scrollOffset: number;
+  zoomMode: string;
+  zoomValue: number | null;
+  updatedAt: string;
+}
+
 export async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...options,
@@ -90,4 +100,19 @@ export async function downloadPdf(token: string, fileId: string) {
   }
 
   return response.arrayBuffer();
+}
+
+export function getReadingProgress(token: string, fileId: string) {
+  return apiRequest<ReadingProgressRecord | null>(`/files/${fileId}/progress?deviceId=web`, {}, token);
+}
+
+export function saveReadingProgress(token: string, fileId: string, page: number) {
+  return apiRequest<ReadingProgressRecord>(
+    `/files/${fileId}/progress`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ deviceId: "web", page, scrollOffset: 0, zoomMode: "fit_width" })
+    },
+    token
+  );
 }

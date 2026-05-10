@@ -21,14 +21,16 @@ interface AnnotationInput {
 export class AnnotationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  list(userId: string, fileId: string) {
+  async list(userId: string, fileId: string) {
+    await this.ensureFile(userId, fileId);
     return this.prisma.annotation.findMany({
       where: { userId, fileId, deletedAt: null },
       orderBy: [{ page: "asc" }, { updatedAt: "desc" }]
     });
   }
 
-  create(userId: string, fileId: string, input: AnnotationInput) {
+  async create(userId: string, fileId: string, input: AnnotationInput) {
+    await this.ensureFile(userId, fileId);
     return this.prisma.annotation.create({
       data: {
         userId,
@@ -68,5 +70,11 @@ export class AnnotationsService {
     const annotation = await this.prisma.annotation.findFirst({ where: { id: annotationId, userId, fileId, deletedAt: null } });
     if (!annotation) throw new NotFoundException("Annotation not found");
     return annotation;
+  }
+
+  private async ensureFile(userId: string, fileId: string) {
+    const file = await this.prisma.file.findFirst({ where: { id: fileId, userId, deletedAt: null } });
+    if (!file) throw new NotFoundException("File not found");
+    return file;
   }
 }
