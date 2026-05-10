@@ -27,6 +27,11 @@ export class SyncController {
     return this.sync.changes(user.id, since, fileId);
   }
 
+  @Get("state")
+  state(@CurrentUser() user: CurrentUser) {
+    return this.sync.state(user.id);
+  }
+
   @Post("changes")
   submit(@CurrentUser() user: CurrentUser, @Body() body: SubmitChangeDto) {
     return this.sync.submit(user.id, body);

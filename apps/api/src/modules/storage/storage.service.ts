@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -44,6 +44,14 @@ export class StorageService {
     const object = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: storageKey }));
     const bytes = await object.Body?.transformToByteArray();
     return Buffer.from(bytes ?? []);
+  }
+
+  async getObjectMetadata(storageKey: string) {
+    return this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: storageKey }));
+  }
+
+  async deleteObject(storageKey: string) {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: storageKey }));
   }
 
   buildUserFileKey(userId: string, fileId: string) {

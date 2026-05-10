@@ -11,6 +11,7 @@ import {
   saveReadingProgress,
   updateFilePageCount,
   updateAnnotation,
+  ApiError,
   type AnnotationRecord,
   type FileRecord
 } from "../lib/api";
@@ -44,18 +45,20 @@ interface PendingNotePayload {
   input: {
     page: number;
     note: string;
-    rect: { x: number; y: number; width: number; height: number };
+    rect: AnnotationRect;
     pageWidth: number;
     pageHeight: number;
   };
 }
+
+type AnnotationRect = { x: number; y: number; width: number; height: number; coordinateSpace?: "pdf" | "viewport" };
 
 interface PendingHighlightPayload {
   fileId: string;
   input: {
     page: number;
     text: string;
-    quadPoints: { x: number; y: number; width: number; height: number }[];
+    quadPoints: AnnotationRect[];
     pageWidth: number;
     pageHeight: number;
   };
@@ -64,7 +67,7 @@ interface PendingHighlightPayload {
 interface PendingAnnotationUpdatePayload {
   fileId: string;
   annotationId: string;
-  input: { note?: string; color?: string };
+  input: { note?: string; color?: string; baseVersion?: number };
 }
 
 interface PendingAnnotationDeletePayload {
@@ -73,20 +76,24 @@ interface PendingAnnotationDeletePayload {
 }
 
 export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
+  const readerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasStageRef = useRef<HTMLDivElement | null>(null);
   const pageLayerRef = useRef<HTMLDivElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const renderTaskRef = useRef<pdfjs.RenderTask | null>(null);
+  const viewportRef = useRef<pdfjs.PageViewport | null>(null);
+  const pendingScrollOffsetRef = useRef<number | null>(null);
   const restoredFileIdRef = useRef<string | null>(null);
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageInput, setPageInput] = useState("1");
   const [scale, setScale] = useState(1.35);
   const [zoomMode, setZoomMode] = useState<ZoomMode>("custom");
+  const [scrollOffset, setScrollOffset] = useState(0);
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "failed">("idle");
-  const [annotationStatus, setAnnotationStatus] = useState<"idle" | "saving" | "queued" | "failed">("idle");
+  const [annotationStatus, setAnnotationStatus] = useState<"idle" | "saving" | "queued" | "failed" | "conflict">("idle");
   const [annotations, setAnnotations] = useState<AnnotationRecord[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState("");
@@ -115,6 +122,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       setPageInput("1");
       setScale(1.35);
       setZoomMode("custom");
+      setScrollOffset(0);
+      pendingScrollOffsetRef.current = null;
       setSearchQuery("");
       setSearchResults([]);
       setSearchStatus("idle");
@@ -211,6 +220,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           if (progress.zoomMode === "fit_width" || progress.zoomMode === "fit_page") {
             setZoomMode(progress.zoomMode);
           }
+          pendingScrollOffsetRef.current = progress.scrollOffset;
         }
       } catch {
         if (!cancelled) setSyncStatus("failed");
@@ -232,6 +242,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       renderTaskRef.current?.cancel();
       const page = await pdf.getPage(pageNumber);
       const viewport = page.getViewport({ scale });
+      viewportRef.current = viewport;
       const canvas = canvasRef.current;
       const context = canvas.getContext("2d");
       if (!context) return;
@@ -246,6 +257,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       try {
         await task.promise;
         await renderTextLayer(page, viewport);
+        restorePendingScrollOffset();
       } catch (err) {
         if (!cancelled && !(err instanceof Error && err.name === "RenderingCancelledException")) {
           setError(err instanceof Error ? err.message : "Failed to render page");
@@ -284,6 +296,18 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     }
   }
 
+  function restorePendingScrollOffset() {
+    const offset = pendingScrollOffsetRef.current;
+    const reader = readerRef.current;
+    if (offset === null || !reader) return;
+
+    window.requestAnimationFrame(() => {
+      reader.scrollTop = offset;
+      setScrollOffset(offset);
+      pendingScrollOffsetRef.current = null;
+    });
+  }
+
   useEffect(() => {
     setPageInput(String(pageNumber));
   }, [pageNumber]);
@@ -293,13 +317,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
     const timeout = window.setTimeout(() => {
       setSyncStatus("syncing");
-      saveReadingProgress(token, file.id, pageNumber, scale, zoomMode)
+      saveReadingProgress(token, file.id, pageNumber, scale, zoomMode, scrollOffset)
         .then(() => setSyncStatus("synced"))
         .catch(() => setSyncStatus("failed"));
     }, 350);
 
     return () => window.clearTimeout(timeout);
-  }, [file, pageNumber, pdf, scale, token, zoomMode]);
+  }, [file, pageNumber, pdf, scale, token, zoomMode, scrollOffset]);
 
   useEffect(() => {
     if (!pdf || zoomMode === "custom") return;
@@ -318,7 +342,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   }, [pageNumber, pdf, zoomMode]);
 
   async function handleCreateNote(event: MouseEvent<HTMLDivElement>) {
-    if (!file || !pageSize.width || !pageSize.height) return;
+    if (!file || !pageSize.width || !pageSize.height || !viewportRef.current) return;
 
     const target = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - target.left;
@@ -329,9 +353,9 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     const input = {
       page: pageNumber,
       note: note.trim(),
-      rect: { x, y, width: 18, height: 18 },
-      pageWidth: pageSize.width,
-      pageHeight: pageSize.height
+      rect: viewportRectToPdfRect({ x, y, width: 18, height: 18 }, viewportRef.current),
+      pageWidth: pageSize.width / scale,
+      pageHeight: pageSize.height / scale
     };
 
     if (!navigator.onLine) {
@@ -399,7 +423,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       payload: { fileId: file.id, annotationId, input } satisfies PendingAnnotationUpdatePayload,
       createdAt: new Date().toISOString()
     });
-    setAnnotations((current) => current.map((annotation) => (annotation.id === annotationId ? { ...annotation, ...input, updatedAt: new Date().toISOString() } : annotation)));
+    const { baseVersion: _baseVersion, ...optimisticInput } = input;
+    setAnnotations((current) => current.map((annotation) => (annotation.id === annotationId ? { ...annotation, ...optimisticInput, updatedAt: new Date().toISOString() } : annotation)));
     setAnnotationStatus("queued");
   }
 
@@ -456,13 +481,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
         setAnnotations(await listAnnotations(token, file.id));
       }
       setAnnotationStatus("idle");
-    } catch {
-      setAnnotationStatus("queued");
+    } catch (err) {
+      await handleAnnotationError(err, "Failed to sync annotation changes");
     }
   }
 
   async function handleCreateHighlight() {
-    if (!file || !pageSize.width || !pageSize.height || !pageLayerRef.current) return;
+    if (!file || !pageSize.width || !pageSize.height || !pageLayerRef.current || !viewportRef.current) return;
 
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim();
@@ -479,14 +504,17 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       .filter((rect) => rect.width > 1 && rect.height > 1 && rect.x <= pageSize.width && rect.y <= pageSize.height);
 
     if (rects.length === 0) return;
+    const quadPoints = rects.map((rect) => viewportRectToPdfRect(rect, viewportRef.current!));
+    const basePageWidth = pageSize.width / scale;
+    const basePageHeight = pageSize.height / scale;
 
     if (!navigator.onLine) {
       await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "highlight", {
         page: pageNumber,
         text: selectedText,
-        quadPoints: rects,
-        pageWidth: pageSize.width,
-        pageHeight: pageSize.height
+        quadPoints,
+        pageWidth: basePageWidth,
+        pageHeight: basePageHeight
       });
       selection.removeAllRanges();
       return;
@@ -497,17 +525,16 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       const created = await createHighlightAnnotation(token, file.id, {
         page: pageNumber,
         text: selectedText,
-        quadPoints: rects,
-        pageWidth: pageSize.width,
-        pageHeight: pageSize.height
+        quadPoints,
+        pageWidth: basePageWidth,
+        pageHeight: basePageHeight
       });
       setAnnotations((current) => [...current, created]);
       setSelectedAnnotationId(created.id);
       setAnnotationStatus("idle");
       selection.removeAllRanges();
     } catch (err) {
-      setAnnotationStatus("failed");
-      setError(err instanceof Error ? err.message : "Failed to save highlight");
+      await handleAnnotationError(err, "Failed to save highlight");
     }
   }
 
@@ -526,8 +553,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       setSelectedAnnotationId((current) => (current === annotationId ? null : current));
       setAnnotationStatus("idle");
     } catch (err) {
-      setAnnotationStatus("failed");
-      setError(err instanceof Error ? err.message : "Failed to delete annotation");
+      await handleAnnotationError(err, "Failed to delete annotation");
     }
   }
 
@@ -537,6 +563,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     const note = editingNote.trim();
     const input = {
       color: editingColor,
+      baseVersion: selectedAnnotation.version,
       ...(note ? { note } : {})
     };
 
@@ -551,9 +578,26 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       setAnnotations((current) => current.map((annotation) => (annotation.id === updated.id ? updated : annotation)));
       setAnnotationStatus("idle");
     } catch (err) {
-      setAnnotationStatus("failed");
-      setError(err instanceof Error ? err.message : "Failed to update annotation");
+      await handleAnnotationError(err, "Failed to update annotation");
     }
+  }
+
+  async function handleAnnotationError(err: unknown, fallbackMessage: string) {
+    if (err instanceof ApiError && err.status === 409) {
+      setAnnotationStatus("conflict");
+      setError("This annotation changed on another device. The latest version has been loaded.");
+      if (file) {
+        try {
+          setAnnotations(await listAnnotations(token, file.id));
+        } catch {
+          // Keep the conflict visible if refresh also fails.
+        }
+      }
+      return;
+    }
+
+    setAnnotationStatus("failed");
+    setError(err instanceof Error ? err.message : fallbackMessage);
   }
 
   function jumpToPage() {
@@ -706,7 +750,11 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   }
 
   return (
-    <section className="reader-placeholder reader-active">
+    <section
+      ref={readerRef}
+      className="reader-placeholder reader-active"
+      onScroll={(event) => setScrollOffset(event.currentTarget.scrollTop)}
+    >
       <div className="reader-bar">
         <div>
           <p className="eyebrow">Reader</p>
@@ -716,6 +764,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           {annotationStatus === "queued" || annotationStatus === "failed" ? (
             <button className="retry-button" onClick={() => void replayPendingAnnotationChanges()}>Retry annotation sync</button>
           ) : null}
+          {annotationStatus === "conflict" ? <p className="conflict-line">Conflict detected. Latest annotation version loaded.</p> : null}
           <p className="shortcut-line"><kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>/</kbd> search · <kbd>Ctrl</kbd> + <kbd>+/-</kbd> zoom</p>
         </div>
         {pdf ? (
@@ -799,31 +848,23 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           {pageSize.width && pageSize.height ? (
             <svg className="annotation-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-label="Page annotations">
               {visibleHighlights.map((annotation) => {
-                const scaleX = annotation.pageWidth ? pageSize.width / annotation.pageWidth : 1;
-                const scaleY = annotation.pageHeight ? pageSize.height / annotation.pageHeight : 1;
-
                 return annotation.quadPoints!.map((rect, index) => (
-                  <rect
-                    className={selectedAnnotationId === annotation.id ? "highlight-rect selected" : "highlight-rect"}
+                  <HighlightRect
+                    annotation={annotation}
                     key={`${annotation.id}-${index}`}
-                    fill={annotation.color}
-                    x={rect.x * scaleX}
-                    y={rect.y * scaleY}
-                    width={rect.width * scaleX}
-                    height={rect.height * scaleY}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedAnnotationId(annotation.id);
-                    }}
+                    pageSize={pageSize}
+                    rect={rect}
+                    selected={selectedAnnotationId === annotation.id}
+                    viewport={viewportRef.current}
+                    onSelect={() => setSelectedAnnotationId(annotation.id)}
                   />
                 ));
               })}
               {visibleNotes.map((annotation) => {
                 const rect = annotation.rect!;
-                const scaleX = annotation.pageWidth ? pageSize.width / annotation.pageWidth : 1;
-                const scaleY = annotation.pageHeight ? pageSize.height / annotation.pageHeight : 1;
-                const x = rect.x * scaleX;
-                const y = rect.y * scaleY;
+                const renderedRect = renderAnnotationRect(rect, annotation.pageWidth, annotation.pageHeight, pageSize, viewportRef.current);
+                const x = renderedRect.x + renderedRect.width / 2;
+                const y = renderedRect.y + renderedRect.height / 2;
 
                 return (
                   <g
@@ -942,6 +983,79 @@ function AnnotationEditor({
       </div>
     </>
   );
+}
+
+function HighlightRect({
+  annotation,
+  rect,
+  pageSize,
+  viewport,
+  selected,
+  onSelect
+}: {
+  annotation: AnnotationRecord;
+  rect: AnnotationRect;
+  pageSize: { width: number; height: number };
+  viewport: pdfjs.PageViewport | null;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const renderedRect = renderAnnotationRect(rect, annotation.pageWidth, annotation.pageHeight, pageSize, viewport);
+
+  return (
+    <rect
+      className={selected ? "highlight-rect selected" : "highlight-rect"}
+      fill={annotation.color}
+      x={renderedRect.x}
+      y={renderedRect.y}
+      width={renderedRect.width}
+      height={renderedRect.height}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+    />
+  );
+}
+
+function viewportRectToPdfRect(rect: AnnotationRect, viewport: pdfjs.PageViewport): AnnotationRect {
+  const start = viewport.convertToPdfPoint(rect.x, rect.y);
+  const end = viewport.convertToPdfPoint(rect.x + rect.width, rect.y + rect.height);
+  return {
+    x: Math.min(start[0], end[0]),
+    y: Math.min(start[1], end[1]),
+    width: Math.abs(end[0] - start[0]),
+    height: Math.abs(end[1] - start[1]),
+    coordinateSpace: "pdf"
+  };
+}
+
+function renderAnnotationRect(
+  rect: AnnotationRect,
+  pageWidth: number | null,
+  pageHeight: number | null,
+  pageSize: { width: number; height: number },
+  viewport: pdfjs.PageViewport | null
+) {
+  if (rect.coordinateSpace === "pdf" && viewport) {
+    const start = viewport.convertToViewportPoint(rect.x, rect.y);
+    const end = viewport.convertToViewportPoint(rect.x + rect.width, rect.y + rect.height);
+    return {
+      x: Math.min(start[0], end[0]),
+      y: Math.min(start[1], end[1]),
+      width: Math.abs(end[0] - start[0]),
+      height: Math.abs(end[1] - start[1])
+    };
+  }
+
+  const scaleX = pageWidth ? pageSize.width / pageWidth : 1;
+  const scaleY = pageHeight ? pageSize.height / pageHeight : 1;
+  return {
+    x: rect.x * scaleX,
+    y: rect.y * scaleY,
+    width: rect.width * scaleX,
+    height: rect.height * scaleY
+  };
 }
 
 function flattenOutline(items: unknown[], level = 0, prefix = ""): OutlineItem[] {

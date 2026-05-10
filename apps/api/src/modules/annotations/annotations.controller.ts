@@ -17,6 +17,7 @@ class UpsertAnnotationDto {
   pageHeight?: number;
   pageRotation?: number;
   deviceId?: string;
+  baseVersion?: number;
 }
 
 @UseGuards(JwtAuthGuard)

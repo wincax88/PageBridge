@@ -21,6 +21,7 @@ interface CompleteUploadInput {
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 const FREE_USER_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024;
 const FREE_USER_FILE_COUNT_QUOTA = 500;
+const SOFT_DELETE_RETENTION_DAYS = 7;
 
 @Injectable()
 export class FilesService {
@@ -31,6 +32,7 @@ export class FilesService {
   ) {}
 
   async list(userId: string) {
+    await this.purgeExpiredDeletedFiles(userId);
     const files = await this.prisma.file.findMany({
       where: { userId, deletedAt: null },
       orderBy: { updatedAt: "desc" },
@@ -40,6 +42,7 @@ export class FilesService {
   }
 
   async usage(userId: string) {
+    await this.purgeExpiredDeletedFiles(userId);
     const aggregate = await this.prisma.file.aggregate({
       where: { userId, deletedAt: null },
       _sum: { sizeBytes: true },
@@ -56,6 +59,7 @@ export class FilesService {
   }
 
   async create(userId: string, input: CreateFileInput) {
+    await this.purgeExpiredDeletedFiles(userId);
     const name = this.normalizeFileName(input.name);
     if (!Number.isFinite(input.sizeBytes) || input.sizeBytes < 0) throw new BadRequestException("File size is invalid");
     if (input.sizeBytes > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
@@ -76,6 +80,7 @@ export class FilesService {
   }
 
   async upload(userId: string, file: Express.Multer.File) {
+    await this.purgeExpiredDeletedFiles(userId);
     await this.redis.limit(`rate:upload:${userId}`, 30, 60 * 60);
     if (!file) throw new BadRequestException("PDF file is required");
     if (file.mimetype !== "application/pdf") throw new BadRequestException("Only PDF files are supported");
@@ -106,6 +111,7 @@ export class FilesService {
   }
 
   async createUploadTarget(userId: string, name: string, sizeBytes: number) {
+    await this.purgeExpiredDeletedFiles(userId);
     await this.redis.limit(`rate:upload:${userId}`, 30, 60 * 60);
     const normalizedName = this.normalizeFileName(name);
     this.validateUploadSize(sizeBytes);
@@ -125,7 +131,9 @@ export class FilesService {
   async completeUpload(userId: string, input: CompleteUploadInput) {
     const name = this.normalizeFileName(input.name);
     this.validateUploadSize(input.sizeBytes);
-    if (!input.fileId || !input.storageKey.startsWith(`users/${userId}/files/`)) throw new BadRequestException("Upload target is invalid");
+    const expectedStorageKey = this.storage.buildUserFileKey(userId, input.fileId);
+    if (!input.fileId || input.storageKey !== expectedStorageKey) throw new BadRequestException("Upload target is invalid");
+    await this.ensureUploadedObject(input.storageKey, input.sizeBytes);
     await this.ensureFileCountQuota(userId);
     await this.ensureStorageQuota(userId, input.sizeBytes);
 
@@ -204,6 +212,17 @@ export class FilesService {
     if (sizeBytes > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
   }
 
+  private async ensureUploadedObject(storageKey: string, sizeBytes: number) {
+    try {
+      const metadata = await this.storage.getObjectMetadata(storageKey);
+      if (metadata.ContentLength !== sizeBytes) throw new BadRequestException("Uploaded file size does not match");
+      if (metadata.ContentType && metadata.ContentType !== "application/pdf") throw new BadRequestException("Only PDF files are supported");
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException("Uploaded PDF was not found");
+    }
+  }
+
   private async ensureStorageQuota(userId: string, incomingBytes: number) {
     const aggregate = await this.prisma.file.aggregate({
       where: { userId, deletedAt: null },
@@ -220,6 +239,24 @@ export class FilesService {
     const count = await this.prisma.file.count({ where: { userId, deletedAt: null } });
     if (count >= FREE_USER_FILE_COUNT_QUOTA) {
       throw new BadRequestException("File count quota exceeded");
+    }
+  }
+
+  private async purgeExpiredDeletedFiles(userId: string) {
+    const expiresBefore = new Date(Date.now() - SOFT_DELETE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const expiredFiles = await this.prisma.file.findMany({
+      where: { userId, deletedAt: { lt: expiresBefore } },
+      select: { id: true, storageKey: true }
+    });
+    if (expiredFiles.length === 0) return;
+
+    for (const file of expiredFiles) {
+      try {
+        await this.storage.deleteObject(file.storageKey);
+      } catch {
+        // The database is the source of truth for retention; missing objects should not block cleanup.
+      }
+      await this.prisma.file.delete({ where: { id: file.id } });
     }
   }
 }

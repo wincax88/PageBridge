@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -16,6 +16,7 @@ interface AnnotationInput {
   pageHeight?: number;
   pageRotation?: number;
   deviceId?: string;
+  baseVersion?: number;
 }
 
 @Injectable()
@@ -55,13 +56,17 @@ export class AnnotationsService {
   }
 
   async update(userId: string, fileId: string, annotationId: string, input: Partial<AnnotationInput>) {
-    await this.ensureAnnotation(userId, fileId, annotationId);
+    const current = await this.ensureAnnotation(userId, fileId, annotationId);
     this.validateAnnotationInput(input, true);
+    if (input.baseVersion !== undefined && input.baseVersion !== current.version) {
+      throw new ConflictException("Annotation has changed on another device");
+    }
+    const { baseVersion: _baseVersion, ...updateInput } = input;
     const annotation = await this.prisma.annotation.update({
       where: { id: annotationId },
-      data: { ...input, version: { increment: 1 } } as never
+      data: { ...updateInput, version: { increment: 1 } } as never
     });
-    await this.recordChange(userId, fileId, "update", annotation.id, annotation.version, input);
+    await this.recordChange(userId, fileId, "update", annotation.id, annotation.version, updateInput);
     return annotation;
   }
 
@@ -116,5 +121,6 @@ export class AnnotationsService {
     if (input.color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(input.color)) throw new BadRequestException("Annotation color is invalid");
     if (input.pageWidth !== undefined && input.pageWidth <= 0) throw new BadRequestException("Page width is invalid");
     if (input.pageHeight !== undefined && input.pageHeight <= 0) throw new BadRequestException("Page height is invalid");
+    if (input.baseVersion !== undefined && (!Number.isInteger(input.baseVersion) || input.baseVersion < 1)) throw new BadRequestException("Annotation version is invalid");
   }
 }

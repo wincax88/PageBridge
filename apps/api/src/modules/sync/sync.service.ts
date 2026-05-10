@@ -35,6 +35,19 @@ export class SyncService {
     });
   }
 
+  async state(userId: string) {
+    const latest = await this.prisma.syncChange.findFirst({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, createdAt: true }
+    });
+
+    return {
+      latestChangeId: latest?.id ?? null,
+      cursor: latest?.createdAt.toISOString() ?? new Date(0).toISOString()
+    };
+  }
+
   async submit(userId: string, input: SubmitChangeInput) {
     await this.redis.limit(`rate:sync:submit:${userId}`, 600, 60);
     const existing = await this.prisma.syncChange.findUnique({ where: { clientRequestId: input.clientRequestId } });

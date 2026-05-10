@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { deleteFile, getStorageUsage, listFiles, listSyncChanges, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
+import { deleteFile, getStorageUsage, getSyncState, listFiles, listSyncChanges, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
 import { useAuthStore } from "../store/auth-store";
 
 const PdfReader = lazy(() => import("./PdfReader"));
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
+const SYNC_POLL_INTERVAL_MS = 2000;
 
 export function App() {
   const queryClient = useQueryClient();
@@ -84,7 +85,11 @@ export function App() {
     if (!accessToken) return;
 
     let cancelled = false;
+    let polling = false;
+    let cursorReady = false;
     const pollChanges = async () => {
+      if (!cursorReady || polling || document.hidden || !navigator.onLine) return;
+      polling = true;
       try {
         const changes = await listSyncChanges(accessToken, syncCursorRef.current);
         if (cancelled || changes.length === 0) return;
@@ -98,13 +103,36 @@ export function App() {
         }
       } catch {
         // Sync polling is opportunistic; direct user actions still surface errors.
+      } finally {
+        polling = false;
       }
     };
 
-    const interval = window.setInterval(() => void pollChanges(), 15000);
+    const initializeCursor = async () => {
+      try {
+        const state = await getSyncState(accessToken);
+        if (!cancelled) {
+          syncCursorRef.current = state.cursor;
+          cursorReady = true;
+          void pollChanges();
+        }
+      } catch {
+        if (!cancelled) cursorReady = true;
+      }
+    };
+
+    const pollWhenVisible = () => void pollChanges();
+    void initializeCursor();
+    const interval = window.setInterval(() => void pollChanges(), SYNC_POLL_INTERVAL_MS);
+    window.addEventListener("focus", pollWhenVisible);
+    window.addEventListener("online", pollWhenVisible);
+    document.addEventListener("visibilitychange", pollWhenVisible);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      window.removeEventListener("focus", pollWhenVisible);
+      window.removeEventListener("online", pollWhenVisible);
+      document.removeEventListener("visibilitychange", pollWhenVisible);
     };
   }, [accessToken, queryClient]);
 
