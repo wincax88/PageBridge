@@ -111,6 +111,15 @@ export class FilesService {
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
+  async updatePageCount(userId: string, fileId: string, pageCount: number) {
+    if (!Number.isInteger(pageCount) || pageCount < 1) throw new BadRequestException("Page count is invalid");
+
+    await this.ensureFile(userId, fileId);
+    const file = await this.prisma.file.update({ where: { id: fileId }, data: { pageCount } });
+    await this.recordChange(userId, fileId, "update", fileId, { pageCount });
+    return { ...file, sizeBytes: file.sizeBytes.toString() };
+  }
+
   async softDelete(userId: string, fileId: string) {
     await this.ensureFile(userId, fileId);
     const file = await this.prisma.file.update({ where: { id: fileId }, data: { deletedAt: new Date() } });

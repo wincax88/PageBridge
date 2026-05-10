@@ -1,6 +1,7 @@
 import { useAuthStore } from "../store/auth-store";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
+let refreshPromise: Promise<AuthResponse | null> | null = null;
 
 export interface AuthResponse {
   user: { id: string; email: string };
@@ -90,6 +91,16 @@ function fetchApi(path: string, options: RequestInit = {}, token?: string, isJso
 }
 
 async function refreshAccessToken() {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = performRefreshAccessToken().finally(() => {
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
+}
+
+async function performRefreshAccessToken() {
   const refreshToken = useAuthStore.getState().refreshToken;
   if (!refreshToken) return null;
 
@@ -175,6 +186,17 @@ export function renameFile(token: string, fileId: string, name: string) {
     {
       method: "PATCH",
       body: JSON.stringify({ name })
+    },
+    token
+  );
+}
+
+export function updateFilePageCount(token: string, fileId: string, pageCount: number) {
+  return apiRequest<FileRecord>(
+    `/files/${fileId}/page-count`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ pageCount })
     },
     token
   );

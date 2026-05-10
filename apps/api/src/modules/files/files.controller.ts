@@ -15,6 +15,10 @@ class RenameFileDto {
   name!: string;
 }
 
+class UpdatePageCountDto {
+  pageCount!: number;
+}
+
 @UseGuards(JwtAuthGuard)
 @Controller("files")
 export class FilesController {
@@ -54,6 +58,11 @@ export class FilesController {
   @Patch(":fileId")
   rename(@CurrentUser() user: CurrentUser, @Param("fileId") fileId: string, @Body() body: RenameFileDto) {
     return this.files.rename(user.id, fileId, body.name);
+  }
+
+  @Patch(":fileId/page-count")
+  updatePageCount(@CurrentUser() user: CurrentUser, @Param("fileId") fileId: string, @Body() body: UpdatePageCountDto) {
+    return this.files.updatePageCount(user.id, fileId, body.pageCount);
   }
 
   @Delete(":fileId")

@@ -8,6 +8,7 @@ import {
   getReadingProgress,
   listAnnotations,
   saveReadingProgress,
+  updateFilePageCount,
   updateAnnotationNote,
   type AnnotationRecord,
   type FileRecord
@@ -70,7 +71,12 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       try {
         const data = await downloadPdf(token, file.id);
         const document = await pdfjs.getDocument({ data }).promise;
-        if (!cancelled) setPdf(document);
+        if (!cancelled) {
+          setPdf(document);
+          if (file.pageCount !== document.numPages) {
+            void updateFilePageCount(token, file.id, document.numPages).catch(() => undefined);
+          }
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load PDF");
       } finally {
@@ -82,7 +88,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     return () => {
       cancelled = true;
     };
-  }, [file, syncPulse, token]);
+  }, [file, token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,7 +108,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     return () => {
       cancelled = true;
     };
-  }, [file, token]);
+  }, [file, syncPulse, token]);
 
   useEffect(() => {
     let cancelled = false;
