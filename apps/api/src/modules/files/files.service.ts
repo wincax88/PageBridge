@@ -11,6 +11,13 @@ interface CreateFileInput {
   pageCount?: number;
 }
 
+interface CompleteUploadInput {
+  fileId: string;
+  name: string;
+  sizeBytes: number;
+  storageKey: string;
+}
+
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 const FREE_USER_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024;
 const FREE_USER_FILE_COUNT_QUOTA = 500;
@@ -98,6 +105,44 @@ export class FilesService {
     return { ...created, sizeBytes: created.sizeBytes.toString() };
   }
 
+  async createUploadTarget(userId: string, name: string, sizeBytes: number) {
+    await this.redis.limit(`rate:upload:${userId}`, 30, 60 * 60);
+    const normalizedName = this.normalizeFileName(name);
+    this.validateUploadSize(sizeBytes);
+    await this.ensureFileCountQuota(userId);
+    await this.ensureStorageQuota(userId, sizeBytes);
+
+    const fileId = randomUUID();
+    const storageKey = this.storage.buildUserFileKey(userId, fileId);
+    return {
+      fileId,
+      name: normalizedName,
+      storageKey,
+      uploadUrl: await this.storage.createPresignedPutUrl(storageKey)
+    };
+  }
+
+  async completeUpload(userId: string, input: CompleteUploadInput) {
+    const name = this.normalizeFileName(input.name);
+    this.validateUploadSize(input.sizeBytes);
+    if (!input.fileId || !input.storageKey.startsWith(`users/${userId}/files/`)) throw new BadRequestException("Upload target is invalid");
+    await this.ensureFileCountQuota(userId);
+    await this.ensureStorageQuota(userId, input.sizeBytes);
+
+    const created = await this.prisma.file.create({
+      data: {
+        id: input.fileId,
+        userId,
+        name,
+        sizeBytes: BigInt(input.sizeBytes),
+        mimeType: "application/pdf",
+        storageKey: input.storageKey
+      }
+    });
+    await this.recordChange(userId, created.id, "create", created.id, { name: created.name, sizeBytes: created.sizeBytes.toString() });
+    return { ...created, sizeBytes: created.sizeBytes.toString() };
+  }
+
   async getContent(userId: string, fileId: string) {
     const file = await this.ensureFile(userId, fileId);
     return { name: file.name, buffer: await this.storage.getPdf(file.storageKey) };
@@ -152,6 +197,11 @@ export class FilesService {
     if (!normalizedName) throw new BadRequestException("File name is required");
     if (normalizedName.length > 255) throw new BadRequestException("File name is too long");
     return normalizedName;
+  }
+
+  private validateUploadSize(sizeBytes: number) {
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) throw new BadRequestException("PDF file is empty");
+    if (sizeBytes > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
   }
 
   private async ensureStorageQuota(userId: string, incomingBytes: number) {

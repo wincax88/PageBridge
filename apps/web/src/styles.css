@@ -336,6 +336,29 @@ kbd {
   padding: 0.75rem;
 }
 
+.outline-panel {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid #ddd3be;
+  background: #f3efe4;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+}
+
+.outline-list {
+  display: grid;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.outline-item {
+  background: transparent;
+  border-top: 1px solid #ddd3be;
+  color: #1f211c;
+  padding-block: 0.55rem;
+  text-align: left;
+}
+
 .search-results p {
   color: #5b5f51;
   margin: 0;
@@ -383,6 +406,27 @@ kbd {
   display: block;
 }
 
+.text-layer {
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  overflow: hidden;
+  pointer-events: auto;
+  user-select: text;
+}
+
+.text-layer span {
+  position: absolute;
+  cursor: text;
+  line-height: 1;
+  transform-origin: left top;
+  white-space: pre;
+}
+
+.text-layer ::selection {
+  background: rgb(255 224 102 / 45%);
+}
+
 .annotation-layer {
   position: absolute;
   inset: 0;
@@ -394,6 +438,18 @@ kbd {
 .annotation-marker {
   pointer-events: auto;
   cursor: pointer;
+}
+
+.highlight-rect {
+  fill: rgb(255 224 102 / 42%);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.highlight-rect.selected {
+  fill: rgb(241 196 107 / 65%);
+  stroke: #8b4b2f;
+  stroke-width: 1.5;
 }
 
 .annotation-marker circle {
@@ -432,6 +488,15 @@ kbd {
   background: #f3efe4;
   border-left: 4px solid #c96e3a;
   padding: 1rem;
+}
+
+.highlight-note {
+  border-left-color: #f1c46b;
+}
+
+.highlight-note p {
+  color: #5b5f51;
+  margin: 0;
 }
 
 .note-actions {

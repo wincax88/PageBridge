@@ -19,6 +19,18 @@ class UpdatePageCountDto {
   pageCount!: number;
 }
 
+class CreateUploadTargetDto {
+  name!: string;
+  sizeBytes!: number;
+}
+
+class CompleteUploadDto {
+  fileId!: string;
+  name!: string;
+  sizeBytes!: number;
+  storageKey!: string;
+}
+
 @UseGuards(JwtAuthGuard)
 @Controller("files")
 export class FilesController {
@@ -43,6 +55,16 @@ export class FilesController {
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 200 * 1024 * 1024 } }))
   upload(@CurrentUser() user: CurrentUser, @UploadedFile() file: Express.Multer.File) {
     return this.files.upload(user.id, file);
+  }
+
+  @Post("upload-target")
+  createUploadTarget(@CurrentUser() user: CurrentUser, @Body() body: CreateUploadTargetDto) {
+    return this.files.createUploadTarget(user.id, body.name, body.sizeBytes);
+  }
+
+  @Post("complete-upload")
+  completeUpload(@CurrentUser() user: CurrentUser, @Body() body: CompleteUploadDto) {
+    return this.files.completeUpload(user.id, body);
   }
 
   @Get(":fileId/content")

@@ -1,4 +1,5 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
@@ -28,6 +29,14 @@ export class StorageService {
         Body: body,
         ContentType: contentType
       })
+    );
+  }
+
+  createPresignedPutUrl(storageKey: string, contentType = "application/pdf") {
+    return getSignedUrl(
+      this.client,
+      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ContentType: contentType }),
+      { expiresIn: 10 * 60 }
     );
   }
 

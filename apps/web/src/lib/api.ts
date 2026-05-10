@@ -42,11 +42,19 @@ export interface AnnotationRecord {
   color: string;
   text: string | null;
   note: string | null;
+  quadPoints: { x: number; y: number; width: number; height: number }[] | null;
   rect: { x: number; y: number; width: number; height: number } | null;
   pageWidth: number | null;
   pageHeight: number | null;
   version: number;
   updatedAt: string;
+}
+
+interface UploadTargetRecord {
+  fileId: string;
+  name: string;
+  storageKey: string;
+  uploadUrl: string;
 }
 
 export interface SyncChangeRecord {
@@ -164,20 +172,39 @@ export function createFile(token: string, name: string) {
 }
 
 export async function uploadPdf(token: string, file: File) {
-  const formData = new FormData();
-  formData.append("file", file);
+  const target = await apiRequest<UploadTargetRecord>(
+    "/files/upload-target",
+    {
+      method: "POST",
+      body: JSON.stringify({ name: file.name, sizeBytes: file.size })
+    },
+    token
+  );
 
-  const response = await fetchWithAuthRetry("/files/upload", {
-    method: "POST",
-    body: formData
-  }, token);
+  const response = await fetch(target.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/pdf" },
+    body: file
+  });
 
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message || `Upload failed: ${response.status}`);
   }
 
-  return response.json() as Promise<FileRecord>;
+  return apiRequest<FileRecord>(
+    "/files/complete-upload",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        fileId: target.fileId,
+        name: target.name,
+        sizeBytes: file.size,
+        storageKey: target.storageKey
+      })
+    },
+    token
+  );
 }
 
 export function renameFile(token: string, fileId: string, name: string) {
@@ -263,6 +290,37 @@ export function createTextNoteAnnotation(
         color: "#C96E3A",
         note: input.note,
         rect: input.rect,
+        pageWidth: input.pageWidth,
+        pageHeight: input.pageHeight,
+        pageRotation: 0,
+        deviceId: "web"
+      })
+    },
+    token
+  );
+}
+
+export function createHighlightAnnotation(
+  token: string,
+  fileId: string,
+  input: {
+    page: number;
+    text: string;
+    quadPoints: { x: number; y: number; width: number; height: number }[];
+    pageWidth: number;
+    pageHeight: number;
+  }
+) {
+  return apiRequest<AnnotationRecord>(
+    `/files/${fileId}/annotations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        type: "highlight",
+        page: input.page,
+        color: "#FFE066",
+        text: input.text,
+        quadPoints: input.quadPoints,
         pageWidth: input.pageWidth,
         pageHeight: input.pageHeight,
         pageRotation: 0,
