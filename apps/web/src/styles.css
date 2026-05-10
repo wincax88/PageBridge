@@ -404,7 +404,7 @@ kbd {
 .reader-active {
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
   padding: 0;
 }
 
@@ -534,8 +534,9 @@ kbd {
 
 .canvas-stage {
   display: grid;
-  gap: 1.15rem;
-  min-height: 0;
+  gap: 1.35rem;
+  min-height: clamp(430px, 56vh, 760px);
+  max-height: clamp(430px, 56vh, 760px);
   place-items: start center;
   overflow: auto;
   background:
@@ -543,7 +544,8 @@ kbd {
     #d8ccb5;
   border-top: 1px solid #cfc2aa;
   padding: clamp(0.9rem, 1.6vw, 1.4rem);
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  scrollbar-gutter: stable both-edges;
 }
 
 .canvas-stage canvas {
@@ -557,6 +559,7 @@ kbd {
   position: relative;
   max-width: 100%;
   cursor: crosshair;
+  order: 1;
 }
 
 .page-layer canvas {
@@ -566,11 +569,23 @@ kbd {
 .adjacent-page {
   display: grid;
   gap: 0.5rem;
+  width: min(100%, 280px);
+  height: auto;
+  min-height: 0;
   max-width: 100%;
   background: transparent;
   color: var(--pb-muted);
   padding: 0;
   text-align: center;
+  white-space: normal;
+}
+
+.adjacent-page:first-child {
+  order: 2;
+}
+
+.adjacent-page:last-child {
+  order: 3;
 }
 
 .adjacent-page span {
@@ -580,6 +595,7 @@ kbd {
 .adjacent-page canvas {
   display: block;
   max-width: 100%;
+  height: auto;
   opacity: 0.72;
 }
 
@@ -761,6 +777,15 @@ button.danger {
 
   .reader-bar {
     position: static;
+  }
+
+  .reader-active {
+    overflow: visible;
+  }
+
+  .canvas-stage {
+    max-height: none;
+    min-height: 360px;
   }
 
   .reader-bar h2 {
