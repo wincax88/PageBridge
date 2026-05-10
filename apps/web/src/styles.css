@@ -53,6 +53,11 @@ button.secondary {
   outline: 1px solid #b8ad98;
 }
 
+button.secondary.active {
+  background: #e9dfca;
+  outline-color: #8b4b2f;
+}
+
 input {
   width: 100%;
   border: 1px solid #b8ad98;
@@ -235,6 +240,12 @@ label {
 .sync-line {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
+}
+
+.retry-button {
+  background: #8b4b2f;
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.7rem;
 }
 
 .shortcut-line {
@@ -441,25 +452,23 @@ kbd {
 }
 
 .highlight-rect {
-  fill: rgb(255 224 102 / 42%);
+  fill-opacity: 0.42;
   pointer-events: auto;
   cursor: pointer;
 }
 
 .highlight-rect.selected {
-  fill: rgb(241 196 107 / 65%);
+  fill-opacity: 0.65;
   stroke: #8b4b2f;
   stroke-width: 1.5;
 }
 
 .annotation-marker circle {
-  fill: #c96e3a;
   stroke: #fffaf0;
   stroke-width: 3;
 }
 
 .annotation-marker.selected circle {
-  fill: #243b2f;
   stroke: #f1c46b;
   stroke-width: 4;
 }
@@ -503,6 +512,24 @@ kbd {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.color-swatch {
+  width: 2rem;
+  height: 2rem;
+  border: 2px solid #fffaf0;
+  box-shadow: 0 0 0 1px #b8ad98;
+  padding: 0;
+}
+
+.color-swatch.selected {
+  box-shadow: 0 0 0 3px #243b2f;
 }
 
 button.danger {

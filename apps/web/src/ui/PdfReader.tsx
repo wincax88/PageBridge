@@ -10,13 +10,16 @@ import {
   listAnnotations,
   saveReadingProgress,
   updateFilePageCount,
-  updateAnnotationNote,
+  updateAnnotation,
   type AnnotationRecord,
   type FileRecord
 } from "../lib/api";
 import { offlineDb } from "../lib/offline-db";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
+const ANNOTATION_COLORS = ["#FFE066", "#F1C46B", "#C96E3A", "#8BCB88", "#7FB3D5", "#CBA6F7"];
+type ZoomMode = "custom" | "fit_width" | "fit_page";
 
 interface PdfReaderProps {
   token: string;
@@ -47,8 +50,31 @@ interface PendingNotePayload {
   };
 }
 
+interface PendingHighlightPayload {
+  fileId: string;
+  input: {
+    page: number;
+    text: string;
+    quadPoints: { x: number; y: number; width: number; height: number }[];
+    pageWidth: number;
+    pageHeight: number;
+  };
+}
+
+interface PendingAnnotationUpdatePayload {
+  fileId: string;
+  annotationId: string;
+  input: { note?: string; color?: string };
+}
+
+interface PendingAnnotationDeletePayload {
+  fileId: string;
+  annotationId: string;
+}
+
 export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasStageRef = useRef<HTMLDivElement | null>(null);
   const pageLayerRef = useRef<HTMLDivElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -58,11 +84,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const [pageNumber, setPageNumber] = useState(1);
   const [pageInput, setPageInput] = useState("1");
   const [scale, setScale] = useState(1.35);
+  const [zoomMode, setZoomMode] = useState<ZoomMode>("custom");
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "failed">("idle");
   const [annotationStatus, setAnnotationStatus] = useState<"idle" | "saving" | "queued" | "failed">("idle");
   const [annotations, setAnnotations] = useState<AnnotationRecord[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState("");
+  const [editingColor, setEditingColor] = useState(ANNOTATION_COLORS[0]);
   const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -86,6 +114,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       setPageNumber(1);
       setPageInput("1");
       setScale(1.35);
+      setZoomMode("custom");
       setSearchQuery("");
       setSearchResults([]);
       setSearchStatus("idle");
@@ -93,7 +122,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       restoredFileIdRef.current = null;
 
       try {
-        const data = await downloadPdf(token, file.id);
+        const data = await loadPdfData(file.id);
         const document = await pdfjs.getDocument({ data }).promise;
         if (!cancelled) {
           setPdf(document);
@@ -114,6 +143,18 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       cancelled = true;
     };
   }, [file, token]);
+
+  async function loadPdfData(fileId: string) {
+    try {
+      const data = await downloadPdf(token, fileId);
+      await offlineDb.pdfFiles.put({ fileId, data: data.slice(0), updatedAt: new Date().toISOString() });
+      return data;
+    } catch (err) {
+      const cached = await offlineDb.pdfFiles.get(fileId);
+      if (cached) return cached.data.slice(0);
+      throw err;
+    }
+  }
 
   async function loadOutline(document: pdfjs.PDFDocumentProxy) {
     try {
@@ -147,8 +188,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   useEffect(() => {
     if (!file) return;
 
-    const replay = () => void replayPendingNotes();
-    void replayPendingNotes();
+    const replay = () => void replayPendingAnnotationChanges();
+    void replayPendingAnnotationChanges();
     window.addEventListener("online", replay);
     return () => window.removeEventListener("online", replay);
   }, [file, token]);
@@ -166,6 +207,9 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           setPageNumber(Math.min(Math.max(1, progress.page), pdf.numPages));
           if (progress.zoomValue) {
             setScale(Number(Math.min(2.5, Math.max(0.75, progress.zoomValue)).toFixed(2)));
+          }
+          if (progress.zoomMode === "fit_width" || progress.zoomMode === "fit_page") {
+            setZoomMode(progress.zoomMode);
           }
         }
       } catch {
@@ -249,13 +293,29 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
     const timeout = window.setTimeout(() => {
       setSyncStatus("syncing");
-      saveReadingProgress(token, file.id, pageNumber, scale)
+      saveReadingProgress(token, file.id, pageNumber, scale, zoomMode)
         .then(() => setSyncStatus("synced"))
         .catch(() => setSyncStatus("failed"));
     }, 350);
 
     return () => window.clearTimeout(timeout);
-  }, [file, pageNumber, pdf, scale, token]);
+  }, [file, pageNumber, pdf, scale, token, zoomMode]);
+
+  useEffect(() => {
+    if (!pdf || zoomMode === "custom") return;
+
+    let cancelled = false;
+    const fit = () => {
+      void applyFitZoom(zoomMode, cancelled);
+    };
+
+    fit();
+    window.addEventListener("resize", fit);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", fit);
+    };
+  }, [pageNumber, pdf, zoomMode]);
 
   async function handleCreateNote(event: MouseEvent<HTMLDivElement>) {
     if (!file || !pageSize.width || !pageSize.height) return;
@@ -275,7 +335,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     };
 
     if (!navigator.onLine) {
-      await queuePendingNote(file.id, input);
+      await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "text_note", input);
       return;
     }
 
@@ -291,29 +351,34 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     }
   }
 
-  async function queuePendingNote(fileId: string, input: PendingNotePayload["input"]) {
-    const localId = `offline-${crypto.randomUUID()}`;
+  async function queuePendingAnnotationCreate(
+    localId: string,
+    fileId: string,
+    type: "text_note" | "highlight",
+    input: PendingNotePayload["input"] | PendingHighlightPayload["input"]
+  ) {
     await offlineDb.pendingChanges.add({
       entityType: "annotation",
       entityId: localId,
       operation: "create",
-      payload: { fileId, input } satisfies PendingNotePayload,
+      payload: { fileId, type, input },
       createdAt: new Date().toISOString()
     });
 
     const now = new Date().toISOString();
+    const isHighlight = type === "highlight";
     setAnnotations((current) => [
       ...current,
       {
         id: localId,
         fileId,
-        type: "text_note",
+        type,
         page: input.page,
-        color: "#C96E3A",
-        text: null,
-        note: input.note,
-        quadPoints: null,
-        rect: input.rect,
+        color: isHighlight ? "#FFE066" : "#C96E3A",
+        text: isHighlight ? (input as PendingHighlightPayload["input"]).text : null,
+        note: isHighlight ? null : (input as PendingNotePayload["input"]).note,
+        quadPoints: isHighlight ? (input as PendingHighlightPayload["input"]).quadPoints : null,
+        rect: isHighlight ? null : (input as PendingNotePayload["input"]).rect,
         pageWidth: input.pageWidth,
         pageHeight: input.pageHeight,
         version: 1,
@@ -324,21 +389,68 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     setAnnotationStatus("queued");
   }
 
-  async function replayPendingNotes() {
+  async function queuePendingAnnotationUpdate(annotationId: string, input: PendingAnnotationUpdatePayload["input"]) {
+    if (!file) return;
+
+    await offlineDb.pendingChanges.add({
+      entityType: "annotation",
+      entityId: annotationId,
+      operation: "update",
+      payload: { fileId: file.id, annotationId, input } satisfies PendingAnnotationUpdatePayload,
+      createdAt: new Date().toISOString()
+    });
+    setAnnotations((current) => current.map((annotation) => (annotation.id === annotationId ? { ...annotation, ...input, updatedAt: new Date().toISOString() } : annotation)));
+    setAnnotationStatus("queued");
+  }
+
+  async function queuePendingAnnotationDelete(annotationId: string) {
+    if (!file) return;
+
+    if (annotationId.startsWith("offline-")) {
+      await offlineDb.pendingChanges.where("entityId").equals(annotationId).delete();
+    } else {
+      await offlineDb.pendingChanges.add({
+        entityType: "annotation",
+        entityId: annotationId,
+        operation: "delete",
+        payload: { fileId: file.id, annotationId } satisfies PendingAnnotationDeletePayload,
+        createdAt: new Date().toISOString()
+      });
+    }
+    setAnnotations((current) => current.filter((annotation) => annotation.id !== annotationId));
+    setSelectedAnnotationId((current) => (current === annotationId ? null : current));
+    setAnnotationStatus("queued");
+  }
+
+  async function replayPendingAnnotationChanges() {
     if (!navigator.onLine) return;
 
     const pendingChanges = await offlineDb.pendingChanges.toArray();
-    const pendingNotes = pendingChanges.filter((change) => change.entityType === "annotation" && change.operation === "create");
-    if (!pendingNotes.length) return;
+    const pendingAnnotations = pendingChanges.filter((change) => change.entityType === "annotation").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (!pendingAnnotations.length) return;
 
     setAnnotationStatus("saving");
     let replayedCurrentFile = false;
     try {
-      for (const change of pendingNotes) {
-        const payload = change.payload as PendingNotePayload;
-        await createTextNoteAnnotation(token, payload.fileId, payload.input);
+      for (const change of pendingAnnotations) {
+        if (change.operation === "create") {
+          const payload = change.payload as (PendingNotePayload & { type?: "text_note" }) | (PendingHighlightPayload & { type: "highlight" });
+          if (payload.type === "highlight") {
+            await createHighlightAnnotation(token, payload.fileId, payload.input as PendingHighlightPayload["input"]);
+          } else {
+            await createTextNoteAnnotation(token, payload.fileId, payload.input as PendingNotePayload["input"]);
+          }
+          if (payload.fileId === file?.id) replayedCurrentFile = true;
+        } else if (change.operation === "update") {
+          const payload = change.payload as PendingAnnotationUpdatePayload;
+          await updateAnnotation(token, payload.fileId, payload.annotationId, payload.input);
+          if (payload.fileId === file?.id) replayedCurrentFile = true;
+        } else if (change.operation === "delete") {
+          const payload = change.payload as PendingAnnotationDeletePayload;
+          await deleteAnnotation(token, payload.fileId, payload.annotationId);
+          if (payload.fileId === file?.id) replayedCurrentFile = true;
+        }
         if (change.id !== undefined) await offlineDb.pendingChanges.delete(change.id);
-        if (payload.fileId === file?.id) replayedCurrentFile = true;
       }
       if (replayedCurrentFile && file) {
         setAnnotations(await listAnnotations(token, file.id));
@@ -368,6 +480,18 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
     if (rects.length === 0) return;
 
+    if (!navigator.onLine) {
+      await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "highlight", {
+        page: pageNumber,
+        text: selectedText,
+        quadPoints: rects,
+        pageWidth: pageSize.width,
+        pageHeight: pageSize.height
+      });
+      selection.removeAllRanges();
+      return;
+    }
+
     setAnnotationStatus("saving");
     try {
       const created = await createHighlightAnnotation(token, file.id, {
@@ -390,6 +514,11 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   async function handleDeleteAnnotation(annotationId: string) {
     if (!file) return;
 
+    if (!navigator.onLine) {
+      await queuePendingAnnotationDelete(annotationId);
+      return;
+    }
+
     setAnnotationStatus("saving");
     try {
       await deleteAnnotation(token, file.id, annotationId);
@@ -402,15 +531,23 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     }
   }
 
-  async function handleSaveSelectedNote() {
+  async function handleSaveSelectedAnnotation() {
     if (!file || !selectedAnnotation) return;
 
     const note = editingNote.trim();
-    if (!note) return;
+    const input = {
+      color: editingColor,
+      ...(note ? { note } : {})
+    };
+
+    if (!navigator.onLine) {
+      await queuePendingAnnotationUpdate(selectedAnnotation.id, input);
+      return;
+    }
 
     setAnnotationStatus("saving");
     try {
-      const updated = await updateAnnotationNote(token, file.id, selectedAnnotation.id, note);
+      const updated = await updateAnnotation(token, file.id, selectedAnnotation.id, input);
       setAnnotations((current) => current.map((annotation) => (annotation.id === updated.id ? updated : annotation)));
       setAnnotationStatus("idle");
     } catch (err) {
@@ -432,7 +569,32 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   }
 
   function changeScale(delta: number) {
+    setZoomMode("custom");
     setScale((current) => Number(Math.min(2.5, Math.max(0.75, current + delta)).toFixed(2)));
+  }
+
+  async function applyFitZoom(mode: ZoomMode, cancelled = false) {
+    if (!pdf || mode === "custom") return;
+
+    const stage = canvasStageRef.current;
+    if (!stage) return;
+
+    const page = await pdf.getPage(pageNumber);
+    if (cancelled) return;
+
+    const viewport = page.getViewport({ scale: 1 });
+    const availableWidth = Math.max(320, stage.clientWidth - 32);
+    const availableHeight = Math.max(320, window.innerHeight - 260);
+    const nextScale = mode === "fit_width"
+      ? availableWidth / viewport.width
+      : Math.min(availableWidth / viewport.width, availableHeight / viewport.height);
+
+    setScale(Number(Math.min(2.5, Math.max(0.75, nextScale)).toFixed(2)));
+  }
+
+  function setFitZoom(mode: ZoomMode) {
+    setZoomMode(mode);
+    void applyFitZoom(mode);
   }
 
   useEffect(() => {
@@ -517,14 +679,21 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     }
   }
 
+  function jumpToAnnotation(annotation: AnnotationRecord) {
+    setPageNumber(annotation.page);
+    setSelectedAnnotationId(annotation.id);
+  }
+
   const visibleAnnotations = annotations.filter((annotation) => annotation.page === pageNumber && annotation.rect);
   const visibleHighlights = annotations.filter((annotation) => annotation.page === pageNumber && annotation.quadPoints);
   const selectedAnnotation = annotations.find((annotation) => annotation.id === selectedAnnotationId) ?? null;
   const visibleNotes = visibleAnnotations.filter((annotation) => annotation.type === "text_note");
+  const annotationList = [...annotations].sort((a, b) => a.page - b.page || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
   useEffect(() => {
     setEditingNote(selectedAnnotation?.note ?? "");
-  }, [selectedAnnotation?.id, selectedAnnotation?.note]);
+    setEditingColor(selectedAnnotation?.color ?? ANNOTATION_COLORS[0]);
+  }, [selectedAnnotation?.id, selectedAnnotation?.note, selectedAnnotation?.color]);
 
   if (!file) {
     return (
@@ -543,7 +712,10 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           <p className="eyebrow">Reader</p>
           <h2>{file.name}</h2>
           <p className="sync-line">Progress: {syncStatus === "idle" ? "ready" : syncStatus}</p>
-          <p className="sync-line">Annotations: {annotationStatus === "idle" ? visibleNotes.length + visibleHighlights.length : annotationStatus}</p>
+          <p className="sync-line">Annotations: {annotationStatus === "idle" ? annotations.length : annotationStatus}</p>
+          {annotationStatus === "queued" || annotationStatus === "failed" ? (
+            <button className="retry-button" onClick={() => void replayPendingAnnotationChanges()}>Retry annotation sync</button>
+          ) : null}
           <p className="shortcut-line"><kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>/</kbd> search · <kbd>Ctrl</kbd> + <kbd>+/-</kbd> zoom</p>
         </div>
         {pdf ? (
@@ -570,6 +742,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
               <button className="secondary" onClick={() => changeScale(-0.15)} disabled={scale <= 0.75}>-</button>
               <span>{Math.round(scale * 100)}%</span>
               <button className="secondary" onClick={() => changeScale(0.15)} disabled={scale >= 2.5}>+</button>
+              <button className={zoomMode === "fit_width" ? "secondary active" : "secondary"} onClick={() => setFitZoom("fit_width")}>Fit width</button>
+              <button className={zoomMode === "fit_page" ? "secondary active" : "secondary"} onClick={() => setFitZoom("fit_page")}>Fit page</button>
             </div>
           </div>
         ) : null}
@@ -618,7 +792,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           </div>
         </div>
       ) : null}
-      <div className="canvas-stage">
+      <div ref={canvasStageRef} className="canvas-stage">
         <div ref={pageLayerRef} className="page-layer" onDoubleClick={handleCreateNote} style={{ width: pageSize.width || undefined, height: pageSize.height || undefined }}>
           <canvas ref={canvasRef} />
           <div ref={textLayerRef} className="text-layer" onMouseUp={() => void handleCreateHighlight()} />
@@ -632,6 +806,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
                   <rect
                     className={selectedAnnotationId === annotation.id ? "highlight-rect selected" : "highlight-rect"}
                     key={`${annotation.id}-${index}`}
+                    fill={annotation.color}
                     x={rect.x * scaleX}
                     y={rect.y * scaleY}
                     width={rect.width * scaleX}
@@ -659,7 +834,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
                       setSelectedAnnotationId(annotation.id);
                     }}
                   >
-                    <circle cx={x} cy={y} r="9" />
+                    <circle cx={x} cy={y} r="9" fill={annotation.color} />
                     <title>{annotation.note ?? "Note"}</title>
                   </g>
                 );
@@ -670,43 +845,102 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       </div>
       <aside className="annotation-panel">
         <div>
-          <p className="eyebrow">Page notes</p>
-          <h3>{visibleNotes.length + visibleHighlights.length ? `${visibleNotes.length + visibleHighlights.length} on this page` : "No annotations yet"}</h3>
+          <p className="eyebrow">Annotations</p>
+          <h3>{annotationList.length ? `${annotationList.length} total · ${visibleNotes.length + visibleHighlights.length} on this page` : "No annotations yet"}</h3>
           <p className="helper-text">Select text to highlight it. Double-click the page to add a note.</p>
         </div>
 
         {selectedAnnotation?.type === "text_note" ? (
           <article className="selected-note">
             <strong>Selected note</strong>
-            <textarea value={editingNote} onChange={(event) => setEditingNote(event.target.value)} rows={4} />
-            <div className="note-actions">
-              <button onClick={handleSaveSelectedNote} disabled={annotationStatus === "saving" || !editingNote.trim()}>Save note</button>
-              <button className="secondary danger" onClick={() => handleDeleteAnnotation(selectedAnnotation.id)} disabled={annotationStatus === "saving"}>Delete note</button>
-            </div>
+            <AnnotationEditor
+              color={editingColor}
+              note={editingNote}
+              onColorChange={setEditingColor}
+              onNoteChange={setEditingNote}
+              onSave={() => void handleSaveSelectedAnnotation()}
+              onDelete={() => void handleDeleteAnnotation(selectedAnnotation.id)}
+              saving={annotationStatus === "saving"}
+              deleteLabel="Delete note"
+            />
           </article>
         ) : null}
         {selectedAnnotation?.type === "highlight" ? (
           <article className="selected-note highlight-note">
             <strong>Selected highlight</strong>
             <p>{selectedAnnotation.text}</p>
-            <button className="secondary danger" onClick={() => handleDeleteAnnotation(selectedAnnotation.id)} disabled={annotationStatus === "saving"}>Delete highlight</button>
+            <AnnotationEditor
+              color={editingColor}
+              note={editingNote}
+              onColorChange={setEditingColor}
+              onNoteChange={setEditingNote}
+              onSave={() => void handleSaveSelectedAnnotation()}
+              onDelete={() => void handleDeleteAnnotation(selectedAnnotation.id)}
+              saving={annotationStatus === "saving"}
+              deleteLabel="Delete highlight"
+            />
           </article>
         ) : null}
 
         <div className="note-list">
-          {[...visibleHighlights, ...visibleNotes].map((annotation, index) => (
+          {annotationList.map((annotation, index) => (
             <button
               className={selectedAnnotationId === annotation.id ? "note-item selected" : "note-item"}
               key={annotation.id}
-              onClick={() => setSelectedAnnotationId(annotation.id)}
+              onClick={() => jumpToAnnotation(annotation)}
             >
-              <span>{annotation.type === "highlight" ? "Highlight" : "Note"} {index + 1}</span>
+              <span>{annotation.type === "highlight" ? "Highlight" : "Note"} {index + 1} · Page {annotation.page}</span>
               <small>{annotation.text ?? annotation.note}</small>
             </button>
           ))}
         </div>
       </aside>
     </section>
+  );
+}
+
+function AnnotationEditor({
+  color,
+  note,
+  onColorChange,
+  onNoteChange,
+  onSave,
+  onDelete,
+  saving,
+  deleteLabel
+}: {
+  color: string;
+  note: string;
+  onColorChange: (color: string) => void;
+  onNoteChange: (note: string) => void;
+  onSave: () => void;
+  onDelete: () => void;
+  saving: boolean;
+  deleteLabel: string;
+}) {
+  return (
+    <>
+      <label>
+        Note
+        <textarea value={note} onChange={(event) => onNoteChange(event.target.value)} rows={4} />
+      </label>
+      <div className="color-row" aria-label="Annotation color">
+        {ANNOTATION_COLORS.map((option) => (
+          <button
+            aria-label={`Use color ${option}`}
+            className={option === color ? "color-swatch selected" : "color-swatch"}
+            key={option}
+            onClick={() => onColorChange(option)}
+            style={{ background: option }}
+            type="button"
+          />
+        ))}
+      </div>
+      <div className="note-actions">
+        <button onClick={onSave} disabled={saving}>Save changes</button>
+        <button className="secondary danger" onClick={onDelete} disabled={saving}>{deleteLabel}</button>
+      </div>
+    </>
   );
 }
 

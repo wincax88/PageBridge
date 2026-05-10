@@ -9,13 +9,24 @@ export interface PendingChange {
   createdAt: string;
 }
 
+export interface CachedPdfFile {
+  fileId: string;
+  data: ArrayBuffer;
+  updatedAt: string;
+}
+
 class PageBridgeDb extends Dexie {
   pendingChanges!: Table<PendingChange, number>;
+  pdfFiles!: Table<CachedPdfFile, string>;
 
   constructor() {
     super("pagebridge");
     this.version(1).stores({
       pendingChanges: "++id, entityType, entityId, createdAt"
+    });
+    this.version(2).stores({
+      pendingChanges: "++id, entityType, entityId, createdAt",
+      pdfFiles: "fileId, updatedAt"
     });
   }
 }

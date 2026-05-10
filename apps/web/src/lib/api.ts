@@ -254,12 +254,12 @@ export function getReadingProgress(token: string, fileId: string) {
   return apiRequest<ReadingProgressRecord | null>(`/files/${fileId}/progress?deviceId=web`, {}, token);
 }
 
-export function saveReadingProgress(token: string, fileId: string, page: number, zoomValue: number) {
+export function saveReadingProgress(token: string, fileId: string, page: number, zoomValue: number, zoomMode = "custom") {
   return apiRequest<ReadingProgressRecord>(
     `/files/${fileId}/progress`,
     {
       method: "PUT",
-      body: JSON.stringify({ deviceId: "web", page, scrollOffset: 0, zoomMode: "custom", zoomValue })
+      body: JSON.stringify({ deviceId: "web", page, scrollOffset: 0, zoomMode, zoomValue })
     },
     token
   );
@@ -341,12 +341,17 @@ export function deleteAnnotation(token: string, fileId: string, annotationId: st
   );
 }
 
-export function updateAnnotationNote(token: string, fileId: string, annotationId: string, note: string) {
+export function updateAnnotation(
+  token: string,
+  fileId: string,
+  annotationId: string,
+  input: { note?: string; color?: string }
+) {
   return apiRequest<AnnotationRecord>(
     `/files/${fileId}/annotations/${annotationId}`,
     {
       method: "PATCH",
-      body: JSON.stringify({ note })
+      body: JSON.stringify(input)
     },
     token
   );
