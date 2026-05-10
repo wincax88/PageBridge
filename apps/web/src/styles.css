@@ -226,10 +226,79 @@ label {
   pointer-events: none;
 }
 
+.annotation-marker {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
 .annotation-marker circle {
   fill: #c96e3a;
   stroke: #fffaf0;
   stroke-width: 3;
+}
+
+.annotation-marker.selected circle {
+  fill: #243b2f;
+  stroke: #f1c46b;
+  stroke-width: 4;
+}
+
+.annotation-panel {
+  display: grid;
+  gap: 1rem;
+  border-top: 1px solid #ddd3be;
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.annotation-panel h3,
+.selected-note p {
+  margin: 0;
+}
+
+.helper-text {
+  color: #5b5f51;
+  margin: 0.25rem 0 0;
+}
+
+.selected-note {
+  display: grid;
+  gap: 0.75rem;
+  background: #f3efe4;
+  border-left: 4px solid #c96e3a;
+  padding: 1rem;
+}
+
+button.danger {
+  color: #8b2f2f;
+  outline-color: #c9a39a;
+}
+
+.note-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.note-item {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  background: transparent;
+  color: #1f211c;
+  outline: 1px solid #ddd3be;
+  text-align: left;
+}
+
+.note-item.selected {
+  background: #e9dfca;
+  outline-color: #c96e3a;
+}
+
+.note-item small {
+  color: #5b5f51;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 860px) {

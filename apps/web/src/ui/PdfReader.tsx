@@ -3,6 +3,7 @@ import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import {
   createTextNoteAnnotation,
+  deleteAnnotation,
   downloadPdf,
   getReadingProgress,
   listAnnotations,
@@ -27,6 +28,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "failed">("idle");
   const [annotationStatus, setAnnotationStatus] = useState<"idle" | "saving" | "failed">("idle");
   const [annotations, setAnnotations] = useState<AnnotationRecord[]>([]);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -40,6 +42,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
       setError(null);
       setPdf(null);
       setAnnotations([]);
+      setSelectedAnnotationId(null);
       setPageSize({ width: 0, height: 0 });
       setPageNumber(1);
       restoredFileIdRef.current = null;
@@ -172,6 +175,7 @@ export function PdfReader({ token, file }: PdfReaderProps) {
         pageHeight: pageSize.height
       });
       setAnnotations((current) => [...current, created]);
+      setSelectedAnnotationId(created.id);
       setAnnotationStatus("idle");
     } catch (err) {
       setAnnotationStatus("failed");
@@ -179,7 +183,23 @@ export function PdfReader({ token, file }: PdfReaderProps) {
     }
   }
 
+  async function handleDeleteAnnotation(annotationId: string) {
+    if (!file) return;
+
+    setAnnotationStatus("saving");
+    try {
+      await deleteAnnotation(token, file.id, annotationId);
+      setAnnotations((current) => current.filter((annotation) => annotation.id !== annotationId));
+      setSelectedAnnotationId((current) => (current === annotationId ? null : current));
+      setAnnotationStatus("idle");
+    } catch (err) {
+      setAnnotationStatus("failed");
+      setError(err instanceof Error ? err.message : "Failed to delete annotation");
+    }
+  }
+
   const visibleAnnotations = annotations.filter((annotation) => annotation.page === pageNumber && annotation.rect);
+  const selectedAnnotation = visibleAnnotations.find((annotation) => annotation.id === selectedAnnotationId) ?? null;
 
   if (!file) {
     return (
@@ -224,7 +244,14 @@ export function PdfReader({ token, file }: PdfReaderProps) {
                 const y = rect.y * scaleY;
 
                 return (
-                  <g key={annotation.id} className="annotation-marker">
+                  <g
+                    key={annotation.id}
+                    className={selectedAnnotationId === annotation.id ? "annotation-marker selected" : "annotation-marker"}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedAnnotationId(annotation.id);
+                    }}
+                  >
                     <circle cx={x} cy={y} r="9" />
                     <title>{annotation.note ?? "Note"}</title>
                   </g>
@@ -234,6 +261,34 @@ export function PdfReader({ token, file }: PdfReaderProps) {
           ) : null}
         </div>
       </div>
+      <aside className="annotation-panel">
+        <div>
+          <p className="eyebrow">Page notes</p>
+          <h3>{visibleAnnotations.length ? `${visibleAnnotations.length} on this page` : "No notes yet"}</h3>
+          <p className="helper-text">Double-click the page to add a note.</p>
+        </div>
+
+        {selectedAnnotation ? (
+          <article className="selected-note">
+            <strong>Selected note</strong>
+            <p>{selectedAnnotation.note}</p>
+            <button className="secondary danger" onClick={() => handleDeleteAnnotation(selectedAnnotation.id)} disabled={annotationStatus === "saving"}>Delete note</button>
+          </article>
+        ) : null}
+
+        <div className="note-list">
+          {visibleAnnotations.map((annotation, index) => (
+            <button
+              className={selectedAnnotationId === annotation.id ? "note-item selected" : "note-item"}
+              key={annotation.id}
+              onClick={() => setSelectedAnnotationId(annotation.id)}
+            >
+              <span>Note {index + 1}</span>
+              <small>{annotation.note}</small>
+            </button>
+          ))}
+        </div>
+      </aside>
     </section>
   );
 }

@@ -166,3 +166,13 @@ export function createTextNoteAnnotation(
     token
   );
 }
+
+export function deleteAnnotation(token: string, fileId: string, annotationId: string) {
+  return apiRequest<AnnotationRecord>(
+    `/files/${fileId}/annotations/${annotationId}`,
+    {
+      method: "DELETE"
+    },
+    token
+  );
+}
