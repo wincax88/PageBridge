@@ -588,6 +588,13 @@ export function App() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <nav className="mobile-tabbar" aria-label="Mobile navigation">
+        <a className="active" href="#library">Docs</a>
+        <a href="#recent">Recent</a>
+        <a href="#annotations">Notes</a>
+        <a href="#settings">Me</a>
+      </nav>
     </main>
   );
 }

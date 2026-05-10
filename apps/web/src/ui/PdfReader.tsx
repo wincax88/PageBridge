@@ -28,6 +28,7 @@ const ANNOTATION_COLORS = ["#FFE066", "#F1C46B", "#C96E3A", "#8BCB88", "#7FB3D5"
 type ZoomMode = "custom" | "fit_width" | "fit_page";
 type AnnotationFilter = "all" | "highlight" | "text_note";
 type ReaderSideTab = "pages" | "contents" | "bookmarks";
+type MobileReaderPanel = "nav" | "search" | "annotations" | null;
 
 interface PdfReaderProps {
   token: string;
@@ -134,6 +135,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const [annotationFilter, setAnnotationFilter] = useState<AnnotationFilter>("all");
   const [annotationSearch, setAnnotationSearch] = useState("");
   const [readerSideTab, setReaderSideTab] = useState<ReaderSideTab>("contents");
+  const [mobilePanel, setMobilePanel] = useState<MobileReaderPanel>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1003,7 +1005,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       {textLayerWarning ? <p className="helper-text">{textLayerWarning}</p> : null}
       {pdf ? (
         <form
-          className="search-bar"
+          className={mobilePanel === "search" ? "search-bar mobile-open" : "search-bar"}
           onSubmit={(event) => {
             event.preventDefault();
             void searchDocument();
@@ -1031,7 +1033,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
         </div>
       ) : null}
       {pdf ? (
-        <div className="reader-side-panel">
+        <div className={mobilePanel === "nav" ? "reader-side-panel mobile-open" : "reader-side-panel"}>
           <div className="reader-side-tabs" aria-label="Reader navigation">
             <Button variant="ghost" className={readerSideTab === "pages" ? "active" : undefined} onClick={() => setReaderSideTab("pages")}>Pages</Button>
             <Button variant="ghost" className={readerSideTab === "contents" ? "active" : undefined} onClick={() => setReaderSideTab("contents")}>Contents</Button>
@@ -1108,7 +1110,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
         </div>
         {pdf && pageNumber < pdf.numPages ? <AdjacentPdfPage label="Next page" pageNumber={pageNumber + 1} pdf={pdf} scale={scale} onOpen={() => setPageNumber(pageNumber + 1)} /> : null}
       </div>
-      <aside className="annotation-panel">
+      <aside className={mobilePanel === "annotations" ? "annotation-panel mobile-open" : "annotation-panel"}>
         <div>
           <p className="eyebrow">Annotations</p>
           <h3>{annotationList.length ? `${annotationList.length} total · ${visibleNotes.length + visibleHighlights.length} on this page` : "No annotations yet"}</h3>
@@ -1176,6 +1178,18 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           ))}
         </div>
       </aside>
+
+      {pdf ? (
+        <div className="mobile-reader-actions" aria-label="Reader actions">
+          <Button variant="ghost" onClick={() => setMobilePanel((current) => (current === "nav" ? null : "nav"))}>Contents</Button>
+          <Button variant="ghost" onClick={() => {
+            setMobilePanel((current) => (current === "search" ? null : "search"));
+            window.setTimeout(() => searchInputRef.current?.focus(), 0);
+          }}>Search</Button>
+          <Button variant="ghost" onClick={() => setMobilePanel(null)}>{pageNumber} / {pdf.numPages}</Button>
+          <Button variant="ghost" onClick={() => setMobilePanel((current) => (current === "annotations" ? null : "annotations"))}>Notes</Button>
+        </div>
+      ) : null}
 
       <Dialog open={Boolean(noteDraftInput)} onOpenChange={(open) => !open && setNoteDraftInput(null)}>
         <DialogContent className="app-dialog">
