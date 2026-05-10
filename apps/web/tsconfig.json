@@ -6,6 +6,10 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "types": ["vite/client"]
   },
   "include": ["src"]

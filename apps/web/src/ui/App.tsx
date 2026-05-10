@@ -1,5 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { deleteFile, getStorageUsage, getSyncState, listFiles, listSyncChanges, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
 import { offlineDb } from "../lib/offline-db";
 import { useAuthStore } from "../store/auth-store";
@@ -36,6 +50,9 @@ export function App() {
   const [fileSyncStatus, setFileSyncStatus] = useState<"idle" | "queued" | "syncing" | "failed">("idle");
   const [fileSearch, setFileSearch] = useState("");
   const [syncPulse, setSyncPulse] = useState(0);
+  const [renameTarget, setRenameTarget] = useState<FileRecord | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<FileRecord | null>(null);
 
   useEffect(() => {
     selectedFileRef.current = selectedFile;
@@ -170,9 +187,15 @@ export function App() {
     setSelectedFile(freshFile ?? null);
   }, [filesQuery.data, filesQuery.isLoading, selectedFile]);
 
-  async function handleRenameFile(file: FileRecord) {
-    const name = window.prompt("Rename PDF", file.name)?.trim();
+  function openRenameDialog(file: FileRecord) {
+    setRenameTarget(file);
+    setRenameValue(file.name);
+  }
+
+  async function handleRenameFile(file: FileRecord, nextName: string) {
+    const name = nextName.trim();
     if (!name || name === file.name) return;
+    setRenameTarget(null);
     applyFileRename(file.id, name);
 
     if (!navigator.onLine) {
@@ -191,7 +214,7 @@ export function App() {
   }
 
   async function handleDeleteFile(file: FileRecord) {
-    if (!window.confirm(`Delete ${file.name}? This removes it from your library.`)) return;
+    setDeleteTarget(null);
     applyFileDelete(file.id);
 
     if (!navigator.onLine) {
@@ -353,17 +376,17 @@ export function App() {
           <p className="eyebrow">PageBridge MVP</p>
           <h1>Read, mark, and continue from anywhere.</h1>
           <p className="lede">This build wires the Web client to the NestJS API, Prisma, PostgreSQL, Redis, and S3-compatible storage foundation.</p>
-          <label>
+          <Label>
             Email
-            <input value={email} onChange={(event) => setEmail(event.target.value)} />
-          </label>
-          <label>
+            <Input value={email} onChange={(event) => setEmail(event.target.value)} />
+          </Label>
+          <Label>
             Password
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
-          </label>
+            <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          </Label>
           <div className="button-row">
-            <button onClick={() => authMutation.mutate("login")} disabled={authMutation.isPending}>Log in</button>
-            <button className="secondary" onClick={() => authMutation.mutate("register")} disabled={authMutation.isPending}>Create account</button>
+            <Button onClick={() => authMutation.mutate("login")} disabled={authMutation.isPending}>Log in</Button>
+            <Button variant="outline" onClick={() => authMutation.mutate("register")} disabled={authMutation.isPending}>Create account</Button>
           </div>
           {authMutation.error ? <p className="error">{authMutation.error.message}</p> : null}
         </section>
@@ -386,7 +409,7 @@ export function App() {
             />
           ) : null}
         </div>
-        <button className="secondary" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>Sign out</button>
+        <Button variant="outline" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>Sign out</Button>
       </aside>
 
       <section className="library">
@@ -396,31 +419,34 @@ export function App() {
             <h1>Your PDFs</h1>
           </div>
           <div className="create-file">
-            <label className="upload-button">
-              Upload PDF
+            <Button asChild>
+            <Label className="upload-button">
+              {uploadMutation.isPending ? "Uploading..." : "Upload PDF"}
               <input
                 type="file"
                 accept="application/pdf"
+                disabled={uploadMutation.isPending}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) void handleUploadFile(file);
                   event.currentTarget.value = "";
                 }}
               />
-            </label>
+            </Label>
+            </Button>
           </div>
         </header>
 
         <div className="content-grid">
           <section className="file-list">
-            <label className="file-search">
+            <Label className="file-search">
               Search files
-              <input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="Filter by PDF name" />
-            </label>
+              <Input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="Filter by PDF name" />
+            </Label>
             {filesQuery.isLoading ? <p>Loading files...</p> : null}
             {fileActionError ? <p className="error">{fileActionError}</p> : null}
             {fileSyncStatus === "queued" || fileSyncStatus === "failed" ? (
-              <button className="retry-button" onClick={() => void replayPendingFileChanges()}>Retry file sync</button>
+              <Button className="retry-button" size="sm" onClick={() => void replayPendingFileChanges()}>Retry file sync</Button>
             ) : null}
             {fileSyncStatus === "syncing" ? <p className="sync-line">File changes syncing...</p> : null}
             {files.length === 0 && !filesQuery.isLoading ? <p>No PDFs yet. Upload one to start reading and annotating.</p> : null}
@@ -432,26 +458,28 @@ export function App() {
                   <span>{formatFileMeta(file)}</span>
                 </div>
                 <div className="file-actions">
-                  <button
+                  <Button
+                    variant="link"
                     className="text-button"
                     onClick={(event) => {
                       event.stopPropagation();
-                      void handleRenameFile(file);
+                      openRenameDialog(file);
                     }}
                     disabled={renameFileMutation.isPending || deleteFileMutation.isPending}
                   >
                     Rename
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="link"
                     className="text-button danger"
                     onClick={(event) => {
                       event.stopPropagation();
-                      void handleDeleteFile(file);
+                      setDeleteTarget(file);
                     }}
                     disabled={renameFileMutation.isPending || deleteFileMutation.isPending}
                   >
                     Delete
-                  </button>
+                  </Button>
                 </div>
               </article>
             ))}
@@ -470,6 +498,45 @@ export function App() {
           )}
         </div>
       </section>
+
+      <Dialog open={Boolean(renameTarget)} onOpenChange={(open) => !open && setRenameTarget(null)}>
+        <DialogContent className="app-dialog">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (renameTarget) void handleRenameFile(renameTarget, renameValue);
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Rename PDF</DialogTitle>
+              <DialogDescription>Give this file a clear library name. The PDF itself will not be modified.</DialogDescription>
+            </DialogHeader>
+            <Label className="dialog-field">
+              File name
+              <Input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} />
+            </Label>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setRenameTarget(null)}>Cancel</Button>
+              <Button type="submit" disabled={!renameValue.trim() || renameValue.trim() === renameTarget?.name}>Save name</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent className="app-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this PDF?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget ? `${deleteTarget.name} will be removed from your library. This action can sync to other devices.` : "This file will be removed from your library."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="danger-action" onClick={() => deleteTarget && void handleDeleteFile(deleteTarget)}>Delete PDF</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

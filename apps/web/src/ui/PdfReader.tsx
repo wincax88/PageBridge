@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   createHighlightAnnotation,
   createTextNoteAnnotation,
@@ -50,6 +55,8 @@ interface PendingNotePayload {
     pageHeight: number;
   };
 }
+
+type NoteDraftInput = Omit<PendingNotePayload["input"], "note">;
 
 type AnnotationRect = { x: number; y: number; width: number; height: number; coordinateSpace?: "pdf" | "viewport" };
 
@@ -120,6 +127,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [noteDraftInput, setNoteDraftInput] = useState<NoteDraftInput | null>(null);
+  const [noteDraftText, setNoteDraftText] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -450,16 +459,21 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     const target = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - target.left;
     const y = event.clientY - target.top;
-    const note = window.prompt("Add a note for this page position");
-    if (!note?.trim()) return;
-
-    const input = {
+    setNoteDraftInput({
       page: pageNumber,
-      note: note.trim(),
       rect: viewportRectToPdfRect({ x, y, width: 18, height: 18 }, viewportRef.current),
       pageWidth: pageSize.width / scale,
       pageHeight: pageSize.height / scale
-    };
+    });
+    setNoteDraftText("");
+  }
+
+  async function handleSaveNoteDraft() {
+    if (!file || !noteDraftInput || !noteDraftText.trim()) return;
+
+    const input = { ...noteDraftInput, note: noteDraftText.trim() };
+    setNoteDraftInput(null);
+    setNoteDraftText("");
 
     if (!navigator.onLine) {
       await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "text_note", input);
@@ -929,20 +943,20 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           <p className="eyebrow">Reader</p>
           <h2>{file.name}</h2>
           <p className="sync-line">Progress: {syncStatus === "idle" ? "ready" : syncStatus}</p>
-          {syncStatus === "failed" ? <button className="retry-button" onClick={() => void replayPendingReadingProgress()}>Retry progress sync</button> : null}
+          {syncStatus === "failed" ? <Button className="retry-button" size="sm" onClick={() => void replayPendingReadingProgress()}>Retry progress sync</Button> : null}
           <p className="sync-line">Annotations: {annotationStatus === "idle" ? annotations.length : annotationStatus}</p>
           {annotationStatus === "queued" || annotationStatus === "failed" ? (
-            <button className="retry-button" onClick={() => void replayPendingAnnotationChanges()}>Retry annotation sync</button>
+            <Button className="retry-button" size="sm" onClick={() => void replayPendingAnnotationChanges()}>Retry annotation sync</Button>
           ) : null}
           {annotationStatus === "conflict" ? <p className="conflict-line">Conflict detected. Latest annotation version loaded.</p> : null}
           {deletedAnnotation && Date.now() <= deletedAnnotation.expiresAt ? (
-            <button className="retry-button" onClick={() => void handleUndoDelete()}>Undo delete</button>
+            <Button className="retry-button" size="sm" onClick={() => void handleUndoDelete()}>Undo delete</Button>
           ) : null}
           <p className="shortcut-line"><kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>/</kbd> search · <kbd>Ctrl</kbd> + <kbd>+/-</kbd> zoom</p>
         </div>
         {pdf ? (
           <div className="page-controls">
-            <button className="secondary" onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber <= 1}>Previous</button>
+            <Button variant="outline" onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber <= 1}>Previous</Button>
             <form
               className="page-jump"
               onSubmit={(event) => {
@@ -950,7 +964,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
                 jumpToPage();
               }}
             >
-              <input
+              <Input
                 aria-label="Page number"
                 inputMode="numeric"
                 value={pageInput}
@@ -959,13 +973,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
               />
               <span>/ {pdf.numPages}</span>
             </form>
-            <button className="secondary" onClick={() => setPageNumber((page) => Math.min(pdf.numPages, page + 1))} disabled={pageNumber >= pdf.numPages}>Next</button>
+            <Button variant="outline" onClick={() => setPageNumber((page) => Math.min(pdf.numPages, page + 1))} disabled={pageNumber >= pdf.numPages}>Next</Button>
             <div className="zoom-controls">
-              <button className="secondary" onClick={() => changeScale(-0.15)} disabled={scale <= 0.75}>-</button>
+              <Button variant="outline" onClick={() => changeScale(-0.15)} disabled={scale <= 0.75}>-</Button>
               <span>{Math.round(scale * 100)}%</span>
-              <button className="secondary" onClick={() => changeScale(0.15)} disabled={scale >= 2.5}>+</button>
-              <button className={zoomMode === "fit_width" ? "secondary active" : "secondary"} onClick={() => setFitZoom("fit_width")}>Fit width</button>
-              <button className={zoomMode === "fit_page" ? "secondary active" : "secondary"} onClick={() => setFitZoom("fit_page")}>Fit page</button>
+              <Button variant="outline" onClick={() => changeScale(0.15)} disabled={scale >= 2.5}>+</Button>
+              <Button variant="outline" className={zoomMode === "fit_width" ? "active" : undefined} onClick={() => setFitZoom("fit_width")}>Fit width</Button>
+              <Button variant="outline" className={zoomMode === "fit_page" ? "active" : undefined} onClick={() => setFitZoom("fit_page")}>Fit page</Button>
             </div>
           </div>
         ) : null}
@@ -982,24 +996,24 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
             void searchDocument();
           }}
         >
-          <input
+          <Input
             ref={searchInputRef}
             aria-label="Search PDF text"
             placeholder="Search text in this PDF"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
           />
-          <button disabled={searchStatus === "searching"}>{searchStatus === "searching" ? "Searching" : "Search"}</button>
+          <Button disabled={searchStatus === "searching"}>{searchStatus === "searching" ? "Searching" : "Search"}</Button>
         </form>
       ) : null}
       {searchStatus === "done" ? (
         <div className="search-results">
           <p>{searchResults.length ? `${searchResults.length} pages matched` : "No text matches found"}</p>
           {searchResults.slice(0, 8).map((result) => (
-            <button className="search-result" key={`${result.page}-${result.preview}`} onClick={() => setPageNumber(result.page)}>
+            <Button variant="ghost" className="search-result" key={`${result.page}-${result.preview}`} onClick={() => setPageNumber(result.page)}>
               <strong>Page {result.page}</strong>
               <span>{result.preview}</span>
-            </button>
+            </Button>
           ))}
         </div>
       ) : null}
@@ -1008,9 +1022,9 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           <p className="eyebrow">Contents</p>
           <div className="outline-list">
             {outlineItems.slice(0, 80).map((item) => (
-              <button className="outline-item" key={item.id} onClick={() => void jumpToOutlineItem(item)} style={{ paddingLeft: `${0.75 + item.level * 1.1}rem` }}>
+              <Button variant="ghost" className="outline-item" key={item.id} onClick={() => void jumpToOutlineItem(item)} style={{ paddingLeft: `${0.75 + item.level * 1.1}rem` }}>
                 {item.title}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -1101,17 +1115,42 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
         <div className="note-list">
           {annotationList.map((annotation, index) => (
-            <button
+            <Button
+              variant="ghost"
               className={selectedAnnotationId === annotation.id ? "note-item selected" : "note-item"}
               key={annotation.id}
               onClick={() => jumpToAnnotation(annotation)}
             >
               <span>{annotation.type === "highlight" ? "Highlight" : "Note"} {index + 1} · Page {annotation.page}</span>
               <small>{annotation.text ?? annotation.note}</small>
-            </button>
+            </Button>
           ))}
         </div>
       </aside>
+
+      <Dialog open={Boolean(noteDraftInput)} onOpenChange={(open) => !open && setNoteDraftInput(null)}>
+        <DialogContent className="app-dialog">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSaveNoteDraft();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Add page note</DialogTitle>
+              <DialogDescription>Write a note for this exact position on page {noteDraftInput?.page ?? pageNumber}.</DialogDescription>
+            </DialogHeader>
+            <Label className="dialog-field">
+              Note
+              <Textarea autoFocus value={noteDraftText} onChange={(event) => setNoteDraftText(event.target.value)} rows={5} />
+            </Label>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setNoteDraftInput(null)}>Cancel</Button>
+              <Button type="submit" disabled={!noteDraftText.trim() || annotationStatus === "saving"}>Add note</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -1159,10 +1198,10 @@ function AdjacentPdfPage({
   }, [pageNumber, pdf, scale]);
 
   return (
-    <button className="adjacent-page" onClick={onOpen} type="button">
+    <Button variant="ghost" className="adjacent-page" onClick={onOpen} type="button">
       <span>{label} · Page {pageNumber}</span>
       <canvas ref={canvasRef} />
-    </button>
+    </Button>
   );
 }
 
@@ -1187,14 +1226,15 @@ function AnnotationEditor({
 }) {
   return (
     <>
-      <label>
+      <Label>
         Note
-        <textarea value={note} onChange={(event) => onNoteChange(event.target.value)} rows={4} />
-      </label>
+        <Textarea value={note} onChange={(event) => onNoteChange(event.target.value)} rows={4} />
+      </Label>
       <div className="color-row" aria-label="Annotation color">
         {ANNOTATION_COLORS.map((option) => (
-          <button
+          <Button
             aria-label={`Use color ${option}`}
+            variant="ghost"
             className={option === color ? "color-swatch selected" : "color-swatch"}
             key={option}
             onClick={() => onColorChange(option)}
@@ -1204,8 +1244,8 @@ function AnnotationEditor({
         ))}
       </div>
       <div className="note-actions">
-        <button onClick={onSave} disabled={saving}>Save changes</button>
-        <button className="secondary danger" onClick={onDelete} disabled={saving}>{deleteLabel}</button>
+        <Button onClick={onSave} disabled={saving}>Save changes</Button>
+        <Button variant="outline" className="danger" onClick={onDelete} disabled={saving}>{deleteLabel}</Button>
       </div>
     </>
   );
