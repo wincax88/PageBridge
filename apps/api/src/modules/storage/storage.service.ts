@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, type ServerSideEncryption } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -7,9 +7,14 @@ import { ConfigService } from "@nestjs/config";
 export class StorageService {
   private readonly bucket: string;
   private readonly client: S3Client;
+  private readonly serverSideEncryption?: ServerSideEncryption;
+  private readonly sseKmsKeyId?: string;
 
   constructor(config: ConfigService) {
     this.bucket = config.get<string>("S3_BUCKET") ?? "pagebridge";
+    const serverSideEncryption = config.get<string>("S3_SERVER_SIDE_ENCRYPTION");
+    this.serverSideEncryption = serverSideEncryption === "AES256" || serverSideEncryption === "aws:kms" ? serverSideEncryption : undefined;
+    this.sseKmsKeyId = config.get<string>("S3_SSE_KMS_KEY_ID");
     this.client = new S3Client({
       endpoint: config.get<string>("S3_ENDPOINT"),
       region: config.get<string>("S3_REGION") ?? "us-east-1",
@@ -27,7 +32,8 @@ export class StorageService {
         Bucket: this.bucket,
         Key: storageKey,
         Body: body,
-        ContentType: contentType
+        ContentType: contentType,
+        ...this.encryptionOptions()
       })
     );
   }
@@ -35,7 +41,7 @@ export class StorageService {
   createPresignedPutUrl(storageKey: string, contentType = "application/pdf") {
     return getSignedUrl(
       this.client,
-      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ContentType: contentType }),
+      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ContentType: contentType, ...this.encryptionOptions() }),
       { expiresIn: 10 * 60 }
     );
   }
@@ -56,5 +62,12 @@ export class StorageService {
 
   buildUserFileKey(userId: string, fileId: string) {
     return `users/${userId}/files/${fileId}.pdf`;
+  }
+
+  private encryptionOptions() {
+    return {
+      ...(this.serverSideEncryption ? { ServerSideEncryption: this.serverSideEncryption } : {}),
+      ...(this.serverSideEncryption === "aws:kms" && this.sseKmsKeyId ? { SSEKMSKeyId: this.sseKmsKeyId } : {})
+    };
   }
 }

@@ -13,7 +13,7 @@ export class ApiError extends Error {
 export interface AuthResponse {
   user: { id: string; email: string };
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string;
 }
 
 export interface FileRecord {
@@ -102,6 +102,7 @@ async function fetchWithAuthRetry(path: string, options: RequestInit = {}, token
 function fetchApi(path: string, options: RequestInit = {}, token?: string, isJson = false) {
   return fetch(`${apiBaseUrl}${path}`, {
     ...options,
+    credentials: "include",
     headers: {
       ...(isJson ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -122,11 +123,10 @@ async function refreshAccessToken() {
 
 async function performRefreshAccessToken() {
   const refreshToken = useAuthStore.getState().refreshToken;
-  if (!refreshToken) return null;
 
   const response = await fetchApi("/auth/refresh", {
     method: "POST",
-    body: JSON.stringify({ refreshToken })
+    body: JSON.stringify(refreshToken ? { refreshToken } : {})
   }, undefined, true);
 
   if (!response.ok) {
@@ -153,10 +153,10 @@ export function register(email: string, password: string) {
   });
 }
 
-export function logout(refreshToken: string) {
+export function logout(refreshToken?: string | null) {
   return apiRequest<{ ok: boolean }>("/auth/logout", {
     method: "POST",
-    body: JSON.stringify({ refreshToken })
+    body: JSON.stringify(refreshToken ? { refreshToken } : {})
   });
 }
 

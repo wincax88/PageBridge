@@ -75,6 +75,14 @@ interface PendingAnnotationDeletePayload {
   annotationId: string;
 }
 
+interface PendingReadingProgressPayload {
+  fileId: string;
+  page: number;
+  zoomValue: number;
+  zoomMode: ZoomMode;
+  scrollOffset: number;
+}
+
 interface DeletedAnnotationSnapshot {
   annotation: AnnotationRecord;
   expiresAt: number;
@@ -108,6 +116,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchStatus, setSearchStatus] = useState<"idle" | "searching" | "done" | "failed">("idle");
+  const [textLayerWarning, setTextLayerWarning] = useState<string | null>(null);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -133,6 +142,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       setSearchQuery("");
       setSearchResults([]);
       setSearchStatus("idle");
+      setTextLayerWarning(null);
       setOutlineItems([]);
       restoredFileIdRef.current = null;
 
@@ -222,8 +232,11 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   useEffect(() => {
     if (!file) return;
 
-    const replay = () => void replayPendingAnnotationChanges();
-    void replayPendingAnnotationChanges();
+    const replay = () => {
+      void replayPendingAnnotationChanges();
+      void replayPendingReadingProgress();
+    };
+    replay();
     window.addEventListener("online", replay);
     return () => window.removeEventListener("online", replay);
   }, [file, token]);
@@ -305,6 +318,11 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     layer.replaceChildren();
     layer.style.width = `${viewport.width}px`;
     layer.style.height = `${viewport.height}px`;
+    if (textContent.items.length === 0) {
+      setTextLayerWarning("This page has no selectable text. Scanned PDFs can be read and position-noted, but text search and highlights need a text layer.");
+    } else {
+      setTextLayerWarning(null);
+    }
 
     for (const item of textContent.items) {
       if (!("str" in item) || !item.str.trim()) continue;
@@ -342,13 +360,73 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
     const timeout = window.setTimeout(() => {
       setSyncStatus("syncing");
-      saveReadingProgress(token, file.id, pageNumber, scale, zoomMode, scrollOffset)
-        .then(() => setSyncStatus("synced"))
-        .catch(() => setSyncStatus("failed"));
+      void persistReadingProgress();
     }, 350);
 
     return () => window.clearTimeout(timeout);
   }, [file, pageNumber, pdf, scale, token, zoomMode, scrollOffset]);
+
+  async function persistReadingProgress() {
+    if (!file) return;
+
+    const payload: PendingReadingProgressPayload = { fileId: file.id, page: pageNumber, zoomValue: scale, zoomMode, scrollOffset };
+    if (!navigator.onLine) {
+      await queuePendingReadingProgress(payload);
+      setSyncStatus("failed");
+      return;
+    }
+
+    try {
+      await saveReadingProgress(token, payload.fileId, payload.page, payload.zoomValue, payload.zoomMode, payload.scrollOffset);
+      await removePendingReadingProgress(payload.fileId);
+      setSyncStatus("synced");
+    } catch {
+      await queuePendingReadingProgress(payload);
+      setSyncStatus("failed");
+    }
+  }
+
+  async function queuePendingReadingProgress(payload: PendingReadingProgressPayload) {
+    await removePendingReadingProgress(payload.fileId);
+    await offlineDb.pendingChanges.add({
+      entityType: "reading_progress",
+      entityId: payload.fileId,
+      operation: "update",
+      payload,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  async function removePendingReadingProgress(fileId: string) {
+    const pending = await offlineDb.pendingChanges
+      .where("entityType")
+      .equals("reading_progress")
+      .and((change) => change.entityId === fileId)
+      .toArray();
+    await Promise.all(pending.map((change) => (change.id === undefined ? Promise.resolve() : offlineDb.pendingChanges.delete(change.id))));
+  }
+
+  async function replayPendingReadingProgress() {
+    if (!navigator.onLine) return;
+
+    const pending = await offlineDb.pendingChanges
+      .where("entityType")
+      .equals("reading_progress")
+      .toArray();
+    if (!pending.length) return;
+
+    setSyncStatus("syncing");
+    try {
+      for (const change of pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+        const payload = change.payload as PendingReadingProgressPayload;
+        await saveReadingProgress(token, payload.fileId, payload.page, payload.zoomValue, payload.zoomMode, payload.scrollOffset);
+        if (change.id !== undefined) await offlineDb.pendingChanges.delete(change.id);
+      }
+      setSyncStatus("synced");
+    } catch {
+      setSyncStatus("failed");
+    }
+  }
 
   useEffect(() => {
     if (!pdf || zoomMode === "custom") return;
@@ -518,7 +596,10 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim();
-    if (!selection || !selectedText || selection.rangeCount === 0) return;
+    if (!selection || !selectedText || selection.rangeCount === 0) {
+      if (textLayerWarning) setError(textLayerWarning);
+      return;
+    }
 
     const pageBounds = pageLayerRef.current.getBoundingClientRect();
     const rects = Array.from(selection.getRangeAt(0).getClientRects())
@@ -771,9 +852,11 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
     try {
       const results: SearchResult[] = [];
+      let pagesWithoutText = 0;
       for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
         const page = await pdf.getPage(pageIndex);
         const textContent = await page.getTextContent();
+        if (textContent.items.length === 0) pagesWithoutText += 1;
         const pageText = textContent.items.map((item) => ("str" in item ? item.str : "")).join(" ");
         const matchIndex = pageText.toLowerCase().indexOf(query);
         if (matchIndex >= 0) {
@@ -785,6 +868,9 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
       setSearchResults(results);
       setSearchStatus("done");
+      if (results.length === 0 && pagesWithoutText > 0) {
+        setTextLayerWarning("Some pages have no text layer. Scanned PDFs can be read, but text search and highlights require selectable text.");
+      }
       if (results[0]) setPageNumber(results[0].page);
     } catch (err) {
       setSearchStatus("failed");
@@ -843,6 +929,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           <p className="eyebrow">Reader</p>
           <h2>{file.name}</h2>
           <p className="sync-line">Progress: {syncStatus === "idle" ? "ready" : syncStatus}</p>
+          {syncStatus === "failed" ? <button className="retry-button" onClick={() => void replayPendingReadingProgress()}>Retry progress sync</button> : null}
           <p className="sync-line">Annotations: {annotationStatus === "idle" ? annotations.length : annotationStatus}</p>
           {annotationStatus === "queued" || annotationStatus === "failed" ? (
             <button className="retry-button" onClick={() => void replayPendingAnnotationChanges()}>Retry annotation sync</button>
@@ -886,6 +973,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
       {isLoading ? <p>Loading PDF...</p> : null}
       {error ? <p className="error">{error}</p> : null}
+      {textLayerWarning ? <p className="helper-text">{textLayerWarning}</p> : null}
       {pdf ? (
         <form
           className="search-bar"

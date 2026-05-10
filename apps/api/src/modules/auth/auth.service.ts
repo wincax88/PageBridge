@@ -48,7 +48,7 @@ export class AuthService {
     return this.issueTokens(user.id, user.email);
   }
 
-  async refresh(refreshToken: string) {
+  async refresh(refreshToken?: string) {
     if (!refreshToken) throw new UnauthorizedException("Invalid refresh token");
     try {
       const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
@@ -66,7 +66,7 @@ export class AuthService {
     }
   }
 
-  async logout(refreshToken: string) {
+  async logout(refreshToken?: string) {
     if (!refreshToken) return { ok: true };
     try {
       const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {

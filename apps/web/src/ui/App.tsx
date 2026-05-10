@@ -1,11 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { deleteFile, getStorageUsage, getSyncState, listFiles, listSyncChanges, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
+import { offlineDb } from "../lib/offline-db";
 import { useAuthStore } from "../store/auth-store";
 
 const PdfReader = lazy(() => import("./PdfReader"));
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 const SYNC_POLL_INTERVAL_MS = 2000;
+
+interface PendingFileRenamePayload {
+  fileId: string;
+  name: string;
+}
+
+interface PendingFileDeletePayload {
+  fileId: string;
+}
+
+interface PendingFileUploadPayload {
+  name: string;
+  type: string;
+  lastModified: number;
+  data: ArrayBuffer;
+}
 
 export function App() {
   const queryClient = useQueryClient();
@@ -16,6 +33,7 @@ export function App() {
   const [password, setPassword] = useState("pagebridge123");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
+  const [fileSyncStatus, setFileSyncStatus] = useState<"idle" | "queued" | "syncing" | "failed">("idle");
   const [fileSearch, setFileSearch] = useState("");
   const [syncPulse, setSyncPulse] = useState(0);
 
@@ -84,6 +102,15 @@ export function App() {
   useEffect(() => {
     if (!accessToken) return;
 
+    const replay = () => void replayPendingFileChanges();
+    replay();
+    window.addEventListener("online", replay);
+    return () => window.removeEventListener("online", replay);
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+
     let cancelled = false;
     let polling = false;
     let cursorReady = false;
@@ -143,18 +170,133 @@ export function App() {
     setSelectedFile(freshFile ?? null);
   }, [filesQuery.data, filesQuery.isLoading, selectedFile]);
 
-  function handleRenameFile(file: FileRecord) {
+  async function handleRenameFile(file: FileRecord) {
     const name = window.prompt("Rename PDF", file.name)?.trim();
     if (!name || name === file.name) return;
-    renameFileMutation.mutate({ fileId: file.id, name });
+    applyFileRename(file.id, name);
+
+    if (!navigator.onLine) {
+      await queuePendingFileRename(file.id, name);
+      return;
+    }
+
+    try {
+      const updated = await renameFile(accessToken!, file.id, name);
+      applyFileRecord(updated);
+      setFileActionError(null);
+    } catch (error) {
+      await queuePendingFileRename(file.id, name);
+      setFileActionError(error instanceof Error ? `${error.message}. Rename queued for retry.` : "Rename queued for retry.");
+    }
   }
 
-  function handleDeleteFile(file: FileRecord) {
+  async function handleDeleteFile(file: FileRecord) {
     if (!window.confirm(`Delete ${file.name}? This removes it from your library.`)) return;
-    deleteFileMutation.mutate(file.id);
+    applyFileDelete(file.id);
+
+    if (!navigator.onLine) {
+      await queuePendingFileDelete(file.id);
+      return;
+    }
+
+    try {
+      await deleteFile(accessToken!, file.id);
+      setFileActionError(null);
+      queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
+    } catch (error) {
+      await queuePendingFileDelete(file.id);
+      setFileActionError(error instanceof Error ? `${error.message}. Delete queued for retry.` : "Delete queued for retry.");
+    }
   }
 
-  function handleUploadFile(file: File) {
+  function applyFileRename(fileId: string, name: string) {
+    queryClient.setQueryData<FileRecord[]>(["files", accessToken], (current) => current?.map((file) => (file.id === fileId ? { ...file, name } : file)) ?? current);
+    setSelectedFile((current) => (current?.id === fileId ? { ...current, name } : current));
+  }
+
+  function applyFileRecord(record: FileRecord) {
+    queryClient.setQueryData<FileRecord[]>(["files", accessToken], (current) => current?.map((file) => (file.id === record.id ? record : file)) ?? current);
+    setSelectedFile((current) => (current?.id === record.id ? record : current));
+  }
+
+  function applyFileDelete(fileId: string) {
+    queryClient.setQueryData<FileRecord[]>(["files", accessToken], (current) => current?.filter((file) => file.id !== fileId) ?? current);
+    setSelectedFile((current) => (current?.id === fileId ? null : current));
+  }
+
+  async function queuePendingFileRename(fileId: string, name: string) {
+    await removePendingFileChange(fileId, "update");
+    await offlineDb.pendingChanges.add({
+      entityType: "file",
+      entityId: fileId,
+      operation: "update",
+      payload: { fileId, name } satisfies PendingFileRenamePayload,
+      createdAt: new Date().toISOString()
+    });
+    setFileSyncStatus("queued");
+  }
+
+  async function queuePendingFileDelete(fileId: string) {
+    await removePendingFileChange(fileId, "update");
+    await removePendingFileChange(fileId, "delete");
+    await offlineDb.pendingChanges.add({
+      entityType: "file",
+      entityId: fileId,
+      operation: "delete",
+      payload: { fileId } satisfies PendingFileDeletePayload,
+      createdAt: new Date().toISOString()
+    });
+    setFileSyncStatus("queued");
+  }
+
+  async function removePendingFileChange(fileId: string, operation: "update" | "delete") {
+    const pending = await offlineDb.pendingChanges
+      .where("entityType")
+      .equals("file")
+      .and((change) => change.entityId === fileId && change.operation === operation)
+      .toArray();
+    await Promise.all(pending.map((change) => (change.id === undefined ? Promise.resolve() : offlineDb.pendingChanges.delete(change.id))));
+  }
+
+  async function replayPendingFileChanges() {
+    if (!accessToken || !navigator.onLine) return;
+
+    const pending = await offlineDb.pendingChanges
+      .where("entityType")
+      .equals("file")
+      .toArray();
+    if (!pending.length) return;
+
+    setFileSyncStatus("syncing");
+    try {
+      for (const change of pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+        if (change.operation === "create") {
+          const payload = change.payload as PendingFileUploadPayload;
+          const file = new File([payload.data], payload.name, { type: payload.type || "application/pdf", lastModified: payload.lastModified });
+          const uploaded = await uploadPdf(accessToken, file);
+          setSelectedFile(uploaded);
+        } else if (change.operation === "update") {
+          const payload = change.payload as PendingFileRenamePayload;
+          const updated = await renameFile(accessToken, payload.fileId, payload.name);
+          applyFileRecord(updated);
+        } else if (change.operation === "delete") {
+          const payload = change.payload as PendingFileDeletePayload;
+          await deleteFile(accessToken, payload.fileId);
+          applyFileDelete(payload.fileId);
+        }
+        if (change.id !== undefined) await offlineDb.pendingChanges.delete(change.id);
+      }
+      setFileSyncStatus("idle");
+      setFileActionError(null);
+      queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+      queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
+    } catch (error) {
+      setFileSyncStatus("failed");
+      setFileActionError(error instanceof Error ? error.message : "Failed to sync pending file changes");
+    }
+  }
+
+  async function handleUploadFile(file: File) {
     if (file.type !== "application/pdf") {
       setFileActionError("Only PDF files are supported");
       return;
@@ -165,7 +307,38 @@ export function App() {
     }
 
     setFileActionError(null);
-    uploadMutation.mutate(file);
+    if (!navigator.onLine) {
+      await queuePendingFileUpload(file);
+      return;
+    }
+
+    try {
+      const uploaded = await uploadPdf(accessToken!, file);
+      setSelectedFile(uploaded);
+      setFileActionError(null);
+      queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+      queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
+    } catch (error) {
+      await queuePendingFileUpload(file);
+      setFileActionError(error instanceof Error ? `${error.message}. Upload queued for retry.` : "Upload queued for retry.");
+    }
+  }
+
+  async function queuePendingFileUpload(file: File) {
+    await offlineDb.pendingChanges.add({
+      entityType: "file",
+      entityId: `upload-${crypto.randomUUID()}`,
+      operation: "create",
+      payload: {
+        name: file.name,
+        type: file.type,
+        lastModified: file.lastModified,
+        data: await file.arrayBuffer()
+      } satisfies PendingFileUploadPayload,
+      createdAt: new Date().toISOString()
+    });
+    setFileSyncStatus("queued");
+    setFileActionError("Upload queued. It will start when you are back online.");
   }
 
   const files = filesQuery.data ?? [];
@@ -230,7 +403,7 @@ export function App() {
                 accept="application/pdf"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
-                  if (file) handleUploadFile(file);
+                  if (file) void handleUploadFile(file);
                   event.currentTarget.value = "";
                 }}
               />
@@ -246,6 +419,10 @@ export function App() {
             </label>
             {filesQuery.isLoading ? <p>Loading files...</p> : null}
             {fileActionError ? <p className="error">{fileActionError}</p> : null}
+            {fileSyncStatus === "queued" || fileSyncStatus === "failed" ? (
+              <button className="retry-button" onClick={() => void replayPendingFileChanges()}>Retry file sync</button>
+            ) : null}
+            {fileSyncStatus === "syncing" ? <p className="sync-line">File changes syncing...</p> : null}
             {files.length === 0 && !filesQuery.isLoading ? <p>No PDFs yet. Upload one to start reading and annotating.</p> : null}
             {files.length > 0 && filteredFiles.length === 0 ? <p>No PDFs match “{fileSearch}”.</p> : null}
             {filteredFiles.map((file) => (
@@ -259,7 +436,7 @@ export function App() {
                     className="text-button"
                     onClick={(event) => {
                       event.stopPropagation();
-                      handleRenameFile(file);
+                      void handleRenameFile(file);
                     }}
                     disabled={renameFileMutation.isPending || deleteFileMutation.isPending}
                   >
@@ -269,7 +446,7 @@ export function App() {
                     className="text-button danger"
                     onClick={(event) => {
                       event.stopPropagation();
-                      handleDeleteFile(file);
+                      void handleDeleteFile(file);
                     }}
                     disabled={renameFileMutation.isPending || deleteFileMutation.isPending}
                   >
