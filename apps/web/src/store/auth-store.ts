@@ -2,22 +2,26 @@ import { create } from "zustand";
 
 interface AuthState {
   accessToken: string | null;
+  refreshToken: string | null;
   userEmail: string | null;
-  setSession: (accessToken: string, userEmail: string) => void;
+  setSession: (accessToken: string, refreshToken: string, userEmail: string) => void;
   clearSession: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   accessToken: localStorage.getItem("pagebridge.accessToken"),
+  refreshToken: localStorage.getItem("pagebridge.refreshToken"),
   userEmail: localStorage.getItem("pagebridge.userEmail"),
-  setSession: (accessToken, userEmail) => {
+  setSession: (accessToken, refreshToken, userEmail) => {
     localStorage.setItem("pagebridge.accessToken", accessToken);
+    localStorage.setItem("pagebridge.refreshToken", refreshToken);
     localStorage.setItem("pagebridge.userEmail", userEmail);
-    set({ accessToken, userEmail });
+    set({ accessToken, refreshToken, userEmail });
   },
   clearSession: () => {
     localStorage.removeItem("pagebridge.accessToken");
+    localStorage.removeItem("pagebridge.refreshToken");
     localStorage.removeItem("pagebridge.userEmail");
-    set({ accessToken: null, userEmail: null });
+    set({ accessToken: null, refreshToken: null, userEmail: null });
   }
 }));

@@ -2,7 +2,14 @@ import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/co
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { compare, hash } from "bcryptjs";
+import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
+
+interface RefreshPayload {
+  sub: string;
+  email: string;
+  jti: string;
+}
 
 @Injectable()
 export class AuthService {
@@ -33,18 +40,63 @@ export class AuthService {
     return this.issueTokens(user.id, user.email);
   }
 
-  private issueTokens(userId: string, email: string) {
+  async refresh(refreshToken: string) {
+    try {
+      const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
+        secret: this.config.get<string>("JWT_REFRESH_SECRET") ?? "dev-refresh-secret"
+      });
+
+      const stored = await this.prisma.refreshToken.findUnique({ where: { id: payload.jti }, include: { user: true } });
+      if (!stored || stored.revokedAt || stored.expiresAt <= new Date()) throw new UnauthorizedException("Invalid refresh token");
+      if (!(await compare(refreshToken, stored.tokenHash))) throw new UnauthorizedException("Invalid refresh token");
+
+      await this.prisma.refreshToken.update({ where: { id: stored.id }, data: { revokedAt: new Date() } });
+      return this.issueTokens(stored.user.id, stored.user.email);
+    } catch {
+      throw new UnauthorizedException("Invalid refresh token");
+    }
+  }
+
+  async logout(refreshToken: string) {
+    try {
+      const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
+        secret: this.config.get<string>("JWT_REFRESH_SECRET") ?? "dev-refresh-secret"
+      });
+      await this.prisma.refreshToken.updateMany({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
+    } catch {
+      // Logout should be idempotent from the client perspective.
+    }
+
+    return { ok: true };
+  }
+
+  private async issueTokens(userId: string, email: string) {
+    const refreshTokenId = randomUUID();
     const payload = { sub: userId, email };
+    const refreshToken = this.jwt.sign(
+      { ...payload, jti: refreshTokenId },
+      {
+        secret: this.config.get<string>("JWT_REFRESH_SECRET") ?? "dev-refresh-secret",
+        expiresIn: "30d"
+      }
+    );
+
+    await this.prisma.refreshToken.create({
+      data: {
+        id: refreshTokenId,
+        userId,
+        tokenHash: await hash(refreshToken, 12),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      }
+    });
+
     return {
       user: { id: userId, email },
       accessToken: this.jwt.sign(payload, {
         secret: this.config.get<string>("JWT_ACCESS_SECRET") ?? "dev-access-secret",
         expiresIn: "15m"
       }),
-      refreshToken: this.jwt.sign(payload, {
-        secret: this.config.get<string>("JWT_REFRESH_SECRET") ?? "dev-refresh-secret",
-        expiresIn: "30d"
-      })
+      refreshToken
     };
   }
 }

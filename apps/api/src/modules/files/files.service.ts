@@ -36,6 +36,7 @@ export class FilesService {
         storageKey: input.storageKey ?? `users/${userId}/pending/${randomUUID()}.pdf`
       }
     });
+    await this.recordChange(userId, file.id, "create", file.id, { name: file.name });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
@@ -57,6 +58,7 @@ export class FilesService {
         storageKey
       }
     });
+    await this.recordChange(userId, created.id, "create", created.id, { name: created.name, sizeBytes: created.sizeBytes.toString() });
 
     return { ...created, sizeBytes: created.sizeBytes.toString() };
   }
@@ -69,13 +71,29 @@ export class FilesService {
   async rename(userId: string, fileId: string, name: string) {
     await this.ensureFile(userId, fileId);
     const file = await this.prisma.file.update({ where: { id: fileId }, data: { name } });
+    await this.recordChange(userId, fileId, "update", fileId, { name });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
   async softDelete(userId: string, fileId: string) {
     await this.ensureFile(userId, fileId);
     const file = await this.prisma.file.update({ where: { id: fileId }, data: { deletedAt: new Date() } });
+    await this.recordChange(userId, fileId, "delete", fileId, { deletedAt: file.deletedAt?.toISOString() });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
+  }
+
+  private async recordChange(userId: string, fileId: string, operation: "create" | "update" | "delete", entityId: string, payload: unknown) {
+    await this.prisma.syncChange.create({
+      data: {
+        userId,
+        fileId,
+        entityType: "file",
+        entityId,
+        operation,
+        clientRequestId: randomUUID(),
+        payload: payload as never
+      }
+    });
   }
 
   private async ensureFile(userId: string, fileId: string) {

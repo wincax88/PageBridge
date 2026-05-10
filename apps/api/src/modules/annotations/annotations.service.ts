@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
 type AnnotationType = "highlight" | "text_note";
@@ -31,7 +32,7 @@ export class AnnotationsService {
 
   async create(userId: string, fileId: string, input: AnnotationInput) {
     await this.ensureFile(userId, fileId);
-    return this.prisma.annotation.create({
+    const annotation = await this.prisma.annotation.create({
       data: {
         userId,
         fileId,
@@ -48,21 +49,49 @@ export class AnnotationsService {
         deviceId: input.deviceId
       }
     });
+    await this.recordChange(userId, fileId, "create", annotation.id, annotation.version, annotation);
+    return annotation;
   }
 
   async update(userId: string, fileId: string, annotationId: string, input: Partial<AnnotationInput>) {
     await this.ensureAnnotation(userId, fileId, annotationId);
-    return this.prisma.annotation.update({
+    const annotation = await this.prisma.annotation.update({
       where: { id: annotationId },
       data: { ...input, version: { increment: 1 } } as never
     });
+    await this.recordChange(userId, fileId, "update", annotation.id, annotation.version, input);
+    return annotation;
   }
 
   async softDelete(userId: string, fileId: string, annotationId: string) {
     await this.ensureAnnotation(userId, fileId, annotationId);
-    return this.prisma.annotation.update({
+    const annotation = await this.prisma.annotation.update({
       where: { id: annotationId },
       data: { deletedAt: new Date(), version: { increment: 1 } }
+    });
+    await this.recordChange(userId, fileId, "delete", annotation.id, annotation.version, { deletedAt: annotation.deletedAt?.toISOString() });
+    return annotation;
+  }
+
+  private async recordChange(
+    userId: string,
+    fileId: string,
+    operation: "create" | "update" | "delete",
+    entityId: string,
+    nextVersion: number,
+    payload: unknown
+  ) {
+    await this.prisma.syncChange.create({
+      data: {
+        userId,
+        fileId,
+        entityType: "annotation",
+        entityId,
+        operation,
+        nextVersion,
+        clientRequestId: randomUUID(),
+        payload: payload as never
+      }
     });
   }
 

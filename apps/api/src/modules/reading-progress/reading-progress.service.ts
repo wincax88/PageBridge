@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
 interface SaveProgressInput {
@@ -21,7 +22,7 @@ export class ReadingProgressService {
   async save(userId: string, fileId: string, input: SaveProgressInput) {
     await this.ensureFile(userId, fileId);
     const deviceId = input.deviceId ?? "web";
-    return this.prisma.readingProgress.upsert({
+    const progress = await this.prisma.readingProgress.upsert({
       where: { fileId_userId_deviceId: { fileId, userId, deviceId } },
       create: {
         fileId,
@@ -39,6 +40,24 @@ export class ReadingProgressService {
         zoomValue: input.zoomValue
       }
     });
+    await this.prisma.syncChange.create({
+      data: {
+        userId,
+        fileId,
+        entityType: "reading_progress",
+        entityId: progress.id,
+        operation: "update",
+        clientRequestId: randomUUID(),
+        payload: {
+          deviceId,
+          page: progress.page,
+          scrollOffset: progress.scrollOffset,
+          zoomMode: progress.zoomMode,
+          zoomValue: progress.zoomValue
+        }
+      }
+    });
+    return progress;
   }
 
   private async ensureFile(userId: string, fileId: string) {

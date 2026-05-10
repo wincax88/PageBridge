@@ -6,6 +6,10 @@ class AuthDto {
   password!: string;
 }
 
+class RefreshTokenDto {
+  refreshToken!: string;
+}
+
 @Controller("auth")
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
@@ -18,5 +22,15 @@ export class AuthController {
   @Post("login")
   login(@Body() body: AuthDto) {
     return this.auth.login(body.email, body.password);
+  }
+
+  @Post("refresh")
+  refresh(@Body() body: RefreshTokenDto) {
+    return this.auth.refresh(body.refreshToken);
+  }
+
+  @Post("logout")
+  logout(@Body() body: RefreshTokenDto) {
+    return this.auth.logout(body.refreshToken);
   }
 }

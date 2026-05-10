@@ -1,3 +1,5 @@
+import { useAuthStore } from "../store/auth-store";
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 export interface AuthResponse {
@@ -40,14 +42,18 @@ export interface AnnotationRecord {
 }
 
 export async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers
+  const response = await fetchJson(path, options, token);
+
+  if (response.status === 401 && token) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      const retry = await fetchJson(path, options, refreshed.accessToken);
+      if (retry.ok) return retry.json() as Promise<T>;
+
+      const retryMessage = await retry.text();
+      throw new Error(retryMessage || `Request failed: ${retry.status}`);
     }
-  });
+  }
 
   if (!response.ok) {
     const message = await response.text();
@@ -55,6 +61,36 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, tok
   }
 
   return response.json() as Promise<T>;
+}
+
+function fetchJson(path: string, options: RequestInit = {}, token?: string) {
+  return fetch(`${apiBaseUrl}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers
+    }
+  });
+}
+
+async function refreshAccessToken() {
+  const refreshToken = useAuthStore.getState().refreshToken;
+  if (!refreshToken) return null;
+
+  const response = await fetchJson("/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({ refreshToken })
+  });
+
+  if (!response.ok) {
+    useAuthStore.getState().clearSession();
+    return null;
+  }
+
+  const session = (await response.json()) as AuthResponse;
+  useAuthStore.getState().setSession(session.accessToken, session.refreshToken, session.user.email);
+  return session;
 }
 
 export function login(email: string, password: string) {
@@ -68,6 +104,13 @@ export function register(email: string, password: string) {
   return apiRequest<AuthResponse>("/auth/register", {
     method: "POST",
     body: JSON.stringify({ email, password })
+  });
+}
+
+export function logout(refreshToken: string) {
+  return apiRequest<{ ok: boolean }>("/auth/logout", {
+    method: "POST",
+    body: JSON.stringify({ refreshToken })
   });
 }
 

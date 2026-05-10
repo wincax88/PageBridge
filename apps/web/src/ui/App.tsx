@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { deleteFile, listFiles, login, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
+import { deleteFile, listFiles, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
 import { useAuthStore } from "../store/auth-store";
 import { PdfReader } from "./PdfReader";
 
 export function App() {
   const queryClient = useQueryClient();
-  const { accessToken, userEmail, setSession, clearSession } = useAuthStore();
+  const { accessToken, refreshToken, userEmail, setSession, clearSession } = useAuthStore();
   const [email, setEmail] = useState("demo@pagebridge.dev");
   const [password, setPassword] = useState("pagebridge123");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
@@ -21,7 +21,16 @@ export function App() {
 
   const authMutation = useMutation({
     mutationFn: async (mode: "login" | "register") => (mode === "login" ? login(email, password) : register(email, password)),
-    onSuccess: (session) => setSession(session.accessToken, session.user.email)
+    onSuccess: (session) => setSession(session.accessToken, session.refreshToken, session.user.email)
+  });
+
+  const logoutMutation = useMutation({
+    mutationFn: () => (refreshToken ? logout(refreshToken) : Promise.resolve({ ok: true })),
+    onSettled: () => {
+      setSelectedFile(null);
+      queryClient.clear();
+      clearSession();
+    }
   });
 
   const uploadMutation = useMutation({
@@ -100,7 +109,7 @@ export function App() {
           <p className="eyebrow">Signed in</p>
           <h2>{userEmail}</h2>
         </div>
-        <button className="secondary" onClick={clearSession}>Sign out</button>
+        <button className="secondary" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>Sign out</button>
       </aside>
 
       <section className="library">
