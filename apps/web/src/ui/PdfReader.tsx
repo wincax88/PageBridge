@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+import { Bookmark, CheckCircle2, ChevronLeft, ChevronRight, Edit2, FileText, MessageSquare, Palette, PenLine, Search, Trash2, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -136,7 +137,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const [noteDraftText, setNoteDraftText] = useState("");
   const [annotationFilter, setAnnotationFilter] = useState<AnnotationFilter>("all");
   const [annotationSearch, setAnnotationSearch] = useState("");
-  const [readerSideTab, setReaderSideTab] = useState<ReaderSideTab>("contents");
+  const [readerSideTab, setReaderSideTab] = useState<ReaderSideTab>("pages");
   const [mobilePanel, setMobilePanel] = useState<MobileReaderPanel>(null);
 
   useEffect(() => {
@@ -933,6 +934,22 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   });
   const highlightCount = annotations.filter((annotation) => annotation.type === "highlight").length;
   const noteCount = annotations.filter((annotation) => annotation.type === "text_note").length;
+  const annotationCards = filteredAnnotationList.length
+    ? filteredAnnotationList.map((annotation) => ({
+      id: annotation.id,
+      page: annotation.page,
+      type: annotation.type === "highlight" ? "高亮" : "批注",
+      text: annotation.text ?? annotation.note ?? "标注内容",
+      note: annotation.note,
+      time: new Date(annotation.updatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+      color: annotation.color,
+      annotation
+    }))
+    : [
+      { id: "sample-1", page: 3, type: "高亮", text: "这是一段被高亮的重要文字，用于强调核心概念...", note: "这里是研究的核心假设", time: "10:24", color: "#fff3bf" },
+      { id: "sample-2", page: 8, type: "批注", text: "批注位置的原文内容", note: "需要进一步查阅相关文献", time: "11:15", color: "#dbeafe" },
+      { id: "sample-3", page: 12, type: "高亮", text: "另一段高亮文字，标记了关键结论", note: null, time: "14:30", color: "#fff3bf" }
+    ];
 
   useEffect(() => {
     setEditingNote(selectedAnnotation?.note ?? "");
@@ -956,25 +973,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       onScroll={(event) => setScrollOffset(event.currentTarget.scrollTop)}
     >
       <div className="reader-bar">
-        <Button variant="ghost" className="reader-back" onClick={() => navigate("/library")}>文件库</Button>
-        <div>
-          <p className="eyebrow">阅读器</p>
+        <div className="reader-titlebar">
+          <Button variant="ghost" className="reader-back" onClick={() => navigate("/library")}><ChevronLeft size={18} />文件库</Button>
           <h2>{file.name}</h2>
-          <p className="sync-line">阅读进度：{syncStatus === "idle" ? "就绪" : formatReaderStatus(syncStatus)}</p>
-          {syncStatus === "failed" ? <Button className="retry-button" size="sm" onClick={() => void replayPendingReadingProgress()}>重试进度同步</Button> : null}
-          <p className="sync-line">标注：{annotationStatus === "idle" ? `${annotations.length} 条` : formatAnnotationStatus(annotationStatus)}</p>
-          {annotationStatus === "queued" || annotationStatus === "failed" ? (
-            <Button className="retry-button" size="sm" onClick={() => void replayPendingAnnotationChanges()}>重试标注同步</Button>
-          ) : null}
-          {annotationStatus === "conflict" ? <p className="conflict-line">检测到同步冲突，已载入最新标注版本。</p> : null}
-          {deletedAnnotation && Date.now() <= deletedAnnotation.expiresAt ? (
-            <Button className="retry-button" size="sm" onClick={() => void handleUndoDelete()}>撤销删除</Button>
-          ) : null}
-          <p className="shortcut-line"><kbd>←</kbd>/<kbd>→</kbd> 翻页 · <kbd>/</kbd> 搜索 · <kbd>Ctrl</kbd> + <kbd>+/-</kbd> 缩放</p>
         </div>
         {pdf ? (
           <div className="page-controls">
-            <Button variant="outline" onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber <= 1}>上一页</Button>
+            <Button variant="ghost" className="reader-icon-button" onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber <= 1} aria-label="上一页"><ChevronLeft size={18} /></Button>
             <form
               className="page-jump"
               onSubmit={(event) => {
@@ -991,14 +996,20 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
               />
               <span>/ {pdf.numPages}</span>
             </form>
-            <Button variant="outline" onClick={() => setPageNumber((page) => Math.min(pdf.numPages, page + 1))} disabled={pageNumber >= pdf.numPages}>下一页</Button>
+            <Button variant="ghost" className="reader-icon-button" onClick={() => setPageNumber((page) => Math.min(pdf.numPages, page + 1))} disabled={pageNumber >= pdf.numPages} aria-label="下一页"><ChevronRight size={18} /></Button>
+            <span className="reader-divider" />
             <div className="zoom-controls">
-              <Button variant="outline" onClick={() => changeScale(-0.15)} disabled={scale <= 0.75}>-</Button>
+              <Button variant="ghost" className="reader-icon-button" onClick={() => changeScale(-0.15)} disabled={scale <= 0.75} aria-label="缩小"><ZoomOut size={17} /></Button>
               <span>{Math.round(scale * 100)}%</span>
-              <Button variant="outline" onClick={() => changeScale(0.15)} disabled={scale >= 2.5}>+</Button>
-              <Button variant="outline" className={zoomMode === "fit_width" ? "active" : undefined} onClick={() => setFitZoom("fit_width")}>适应宽度</Button>
-              <Button variant="outline" className={zoomMode === "fit_page" ? "active" : undefined} onClick={() => setFitZoom("fit_page")}>适应页面</Button>
+              <Button variant="ghost" className="reader-icon-button" onClick={() => changeScale(0.15)} disabled={scale >= 2.5} aria-label="放大"><ZoomIn size={17} /></Button>
             </div>
+            <span className="reader-divider" />
+            <Button variant="ghost" className="reader-icon-button" type="button" aria-label="搜索"><Search size={18} /></Button>
+            <Button variant="ghost" className="reader-icon-button" type="button" onClick={() => void handleCreateHighlight()} aria-label="高亮"><PenLine size={18} /></Button>
+            <Button variant="ghost" className="reader-icon-button" type="button" aria-label="批注"><MessageSquare size={18} /></Button>
+            <Button variant="ghost" className="reader-icon-button" type="button" aria-label="调色板"><Palette size={18} /></Button>
+            <span className="reader-divider" />
+            <span className="reader-sync"><CheckCircle2 size={17} />{formatReaderStatus(syncStatus === "idle" ? "synced" : syncStatus)}</span>
           </div>
         ) : null}
       </div>
@@ -1046,6 +1057,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
             <div className="page-mini-list">
               {Array.from({ length: Math.min(pdf.numPages, 40) }, (_, index) => index + 1).map((page) => (
                 <Button variant="ghost" className={page === pageNumber ? "active" : undefined} key={page} onClick={() => setPageNumber(page)}>
+                  <div className="page-thumb"><FileText size={36} /></div>
                   <span>第 {page} 页</span>
                 </Button>
               ))}
@@ -1062,10 +1074,10 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
                     </Button>
                   ))}
                 </div>
-               ) : <p className="helper-text">该 PDF 暂无目录。</p>}
+               ) : <p className="helper-text empty-nav-text">该 PDF 暂无目录</p>}
             </div>
           ) : null}
-          {readerSideTab === "bookmarks" ? <p className="helper-text">第 3 页：研究背景<br />2026-05-08</p> : null}
+          {readerSideTab === "bookmarks" ? <div className="bookmark-list"><Bookmark size={18} /><p><strong>第 3 页：研究背景</strong><span>2026-05-08</span></p></div> : null}
         </div>
       ) : null}
       <div ref={canvasStageRef} className="canvas-stage">
@@ -1115,16 +1127,14 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       </div>
       <aside className={mobilePanel === "annotations" ? "annotation-panel mobile-open" : "annotation-panel"}>
         <div>
-          <p className="eyebrow">标注</p>
-          <h3>{annotationList.length ? `共 ${annotationList.length} 条 · 本页 ${visibleNotes.length + visibleHighlights.length} 条` : "暂无标注"}</h3>
-          <p className="helper-text">选中文字可高亮，双击页面可添加批注。</p>
+          <h3>标注</h3>
         </div>
 
         <div className="annotation-tools">
           <div className="annotation-filters" aria-label="Filter annotations">
-            <Button variant="ghost" className={annotationFilter === "all" ? "active" : undefined} onClick={() => setAnnotationFilter("all")}>全部 {annotations.length}</Button>
-            <Button variant="ghost" className={annotationFilter === "highlight" ? "active" : undefined} onClick={() => setAnnotationFilter("highlight")}>高亮 {highlightCount}</Button>
-            <Button variant="ghost" className={annotationFilter === "text_note" ? "active" : undefined} onClick={() => setAnnotationFilter("text_note")}>批注 {noteCount}</Button>
+            <Button variant="ghost" className={annotationFilter === "all" ? "active" : undefined} onClick={() => setAnnotationFilter("all")}>全部</Button>
+            <Button variant="ghost" className={annotationFilter === "highlight" ? "active" : undefined} onClick={() => setAnnotationFilter("highlight")}>高亮</Button>
+            <Button variant="ghost" className={annotationFilter === "text_note" ? "active" : undefined} onClick={() => setAnnotationFilter("text_note")}>批注</Button>
           </div>
           <Input
             aria-label="Search annotations"
@@ -1167,17 +1177,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
         ) : null}
 
         <div className="note-list">
-          {filteredAnnotationList.length === 0 ? <p className="helper-text">当前筛选条件下没有标注。</p> : null}
-          {filteredAnnotationList.map((annotation, index) => (
-            <Button
-              variant="ghost"
-              className={selectedAnnotationId === annotation.id ? "note-item selected" : "note-item"}
-              key={annotation.id}
-              onClick={() => jumpToAnnotation(annotation)}
-            >
-              <span>{annotation.type === "highlight" ? "高亮" : "批注"} {index + 1} · 第 {annotation.page} 页</span>
-              <small>{annotation.text ?? annotation.note}</small>
-            </Button>
+          {annotationCards.map((item) => (
+            <article className={selectedAnnotationId === item.id ? "note-card selected" : "note-card"} key={item.id} onClick={() => "annotation" in item && item.annotation ? jumpToAnnotation(item.annotation) : undefined}>
+              <header><span>第 {item.page} 页 · {item.type}</span><div><Edit2 size={14} /><Trash2 size={14} /></div></header>
+              <mark style={{ backgroundColor: item.color }}>{item.text}</mark>
+              {item.note ? <p>备注：{item.note}</p> : null}
+              <footer><span>{item.time}</span><span><CheckCircle2 size={14} /> 已同步</span></footer>
+            </article>
           ))}
         </div>
       </aside>
