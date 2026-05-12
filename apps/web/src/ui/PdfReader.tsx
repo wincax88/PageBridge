@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,7 @@ interface DeletedAnnotationSnapshot {
 }
 
 export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
+  const navigate = useNavigate();
   const readerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasStageRef = useRef<HTMLDivElement | null>(null);
@@ -940,9 +942,9 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   if (!file) {
     return (
       <section className="reader-placeholder">
-        <p className="eyebrow">Reader</p>
-        <h2>Select a PDF</h2>
-        <p>Upload a PDF, then select it from the library to render pages here.</p>
+        <p className="eyebrow">阅读器</p>
+        <h2>选择一个 PDF</h2>
+        <p>上传 PDF 后，从文件库选择文档即可在这里阅读。</p>
       </section>
     );
   }
@@ -954,24 +956,25 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       onScroll={(event) => setScrollOffset(event.currentTarget.scrollTop)}
     >
       <div className="reader-bar">
+        <Button variant="ghost" className="reader-back" onClick={() => navigate("/library")}>文件库</Button>
         <div>
-          <p className="eyebrow">Reader</p>
+          <p className="eyebrow">阅读器</p>
           <h2>{file.name}</h2>
-          <p className="sync-line">Progress: {syncStatus === "idle" ? "ready" : syncStatus}</p>
-          {syncStatus === "failed" ? <Button className="retry-button" size="sm" onClick={() => void replayPendingReadingProgress()}>Retry progress sync</Button> : null}
-          <p className="sync-line">Annotations: {annotationStatus === "idle" ? annotations.length : annotationStatus}</p>
+          <p className="sync-line">阅读进度：{syncStatus === "idle" ? "就绪" : formatReaderStatus(syncStatus)}</p>
+          {syncStatus === "failed" ? <Button className="retry-button" size="sm" onClick={() => void replayPendingReadingProgress()}>重试进度同步</Button> : null}
+          <p className="sync-line">标注：{annotationStatus === "idle" ? `${annotations.length} 条` : formatAnnotationStatus(annotationStatus)}</p>
           {annotationStatus === "queued" || annotationStatus === "failed" ? (
-            <Button className="retry-button" size="sm" onClick={() => void replayPendingAnnotationChanges()}>Retry annotation sync</Button>
+            <Button className="retry-button" size="sm" onClick={() => void replayPendingAnnotationChanges()}>重试标注同步</Button>
           ) : null}
-          {annotationStatus === "conflict" ? <p className="conflict-line">Conflict detected. Latest annotation version loaded.</p> : null}
+          {annotationStatus === "conflict" ? <p className="conflict-line">检测到同步冲突，已载入最新标注版本。</p> : null}
           {deletedAnnotation && Date.now() <= deletedAnnotation.expiresAt ? (
-            <Button className="retry-button" size="sm" onClick={() => void handleUndoDelete()}>Undo delete</Button>
+            <Button className="retry-button" size="sm" onClick={() => void handleUndoDelete()}>撤销删除</Button>
           ) : null}
-          <p className="shortcut-line"><kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>/</kbd> search · <kbd>Ctrl</kbd> + <kbd>+/-</kbd> zoom</p>
+          <p className="shortcut-line"><kbd>←</kbd>/<kbd>→</kbd> 翻页 · <kbd>/</kbd> 搜索 · <kbd>Ctrl</kbd> + <kbd>+/-</kbd> 缩放</p>
         </div>
         {pdf ? (
           <div className="page-controls">
-            <Button variant="outline" onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber <= 1}>Previous</Button>
+            <Button variant="outline" onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber <= 1}>上一页</Button>
             <form
               className="page-jump"
               onSubmit={(event) => {
@@ -988,19 +991,19 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
               />
               <span>/ {pdf.numPages}</span>
             </form>
-            <Button variant="outline" onClick={() => setPageNumber((page) => Math.min(pdf.numPages, page + 1))} disabled={pageNumber >= pdf.numPages}>Next</Button>
+            <Button variant="outline" onClick={() => setPageNumber((page) => Math.min(pdf.numPages, page + 1))} disabled={pageNumber >= pdf.numPages}>下一页</Button>
             <div className="zoom-controls">
               <Button variant="outline" onClick={() => changeScale(-0.15)} disabled={scale <= 0.75}>-</Button>
               <span>{Math.round(scale * 100)}%</span>
               <Button variant="outline" onClick={() => changeScale(0.15)} disabled={scale >= 2.5}>+</Button>
-              <Button variant="outline" className={zoomMode === "fit_width" ? "active" : undefined} onClick={() => setFitZoom("fit_width")}>Fit width</Button>
-              <Button variant="outline" className={zoomMode === "fit_page" ? "active" : undefined} onClick={() => setFitZoom("fit_page")}>Fit page</Button>
+              <Button variant="outline" className={zoomMode === "fit_width" ? "active" : undefined} onClick={() => setFitZoom("fit_width")}>适应宽度</Button>
+              <Button variant="outline" className={zoomMode === "fit_page" ? "active" : undefined} onClick={() => setFitZoom("fit_page")}>适应页面</Button>
             </div>
           </div>
         ) : null}
       </div>
 
-      {isLoading ? <p>Loading PDF...</p> : null}
+      {isLoading ? <p>正在加载 PDF...</p> : null}
       {error ? <p className="error">{error}</p> : null}
       {textLayerWarning ? <p className="helper-text">{textLayerWarning}</p> : null}
       {pdf ? (
@@ -1014,19 +1017,19 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           <Input
             ref={searchInputRef}
             aria-label="Search PDF text"
-            placeholder="Search text in this PDF"
+            placeholder="搜索 PDF 内容"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
           />
-          <Button disabled={searchStatus === "searching"}>{searchStatus === "searching" ? "Searching" : "Search"}</Button>
+          <Button disabled={searchStatus === "searching"}>{searchStatus === "searching" ? "搜索中" : "搜索"}</Button>
         </form>
       ) : null}
       {searchStatus === "done" ? (
         <div className="search-results">
-          <p>{searchResults.length ? `${searchResults.length} pages matched` : "No text matches found"}</p>
+          <p>{searchResults.length ? `${searchResults.length} 页匹配` : "未找到匹配文本"}</p>
           {searchResults.slice(0, 8).map((result) => (
             <Button variant="ghost" className="search-result" key={`${result.page}-${result.preview}`} onClick={() => setPageNumber(result.page)}>
-              <strong>Page {result.page}</strong>
+              <strong>第 {result.page} 页</strong>
               <span>{result.preview}</span>
             </Button>
           ))}
@@ -1035,22 +1038,22 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       {pdf ? (
         <div className={mobilePanel === "nav" ? "reader-side-panel mobile-open" : "reader-side-panel"}>
           <div className="reader-side-tabs" aria-label="Reader navigation">
-            <Button variant="ghost" className={readerSideTab === "pages" ? "active" : undefined} onClick={() => setReaderSideTab("pages")}>Pages</Button>
-            <Button variant="ghost" className={readerSideTab === "contents" ? "active" : undefined} onClick={() => setReaderSideTab("contents")}>Contents</Button>
-            <Button variant="ghost" className={readerSideTab === "bookmarks" ? "active" : undefined} onClick={() => setReaderSideTab("bookmarks")}>Bookmarks</Button>
+            <Button variant="ghost" className={readerSideTab === "pages" ? "active" : undefined} onClick={() => setReaderSideTab("pages")}>缩略图</Button>
+            <Button variant="ghost" className={readerSideTab === "contents" ? "active" : undefined} onClick={() => setReaderSideTab("contents")}>目录</Button>
+            <Button variant="ghost" className={readerSideTab === "bookmarks" ? "active" : undefined} onClick={() => setReaderSideTab("bookmarks")}>书签</Button>
           </div>
           {readerSideTab === "pages" ? (
             <div className="page-mini-list">
               {Array.from({ length: Math.min(pdf.numPages, 40) }, (_, index) => index + 1).map((page) => (
                 <Button variant="ghost" className={page === pageNumber ? "active" : undefined} key={page} onClick={() => setPageNumber(page)}>
-                  <span>Page {page}</span>
+                  <span>第 {page} 页</span>
                 </Button>
               ))}
             </div>
           ) : null}
           {readerSideTab === "contents" ? (
             <div className="outline-panel">
-              <p className="eyebrow">Contents</p>
+              <p className="eyebrow">目录</p>
               {outlineItems.length ? (
                 <div className="outline-list">
                   {outlineItems.slice(0, 80).map((item) => (
@@ -1059,14 +1062,14 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
                     </Button>
                   ))}
                 </div>
-              ) : <p className="helper-text">This PDF has no outline.</p>}
+               ) : <p className="helper-text">该 PDF 暂无目录。</p>}
             </div>
           ) : null}
-          {readerSideTab === "bookmarks" ? <p className="helper-text">Bookmarks are not available yet.</p> : null}
+          {readerSideTab === "bookmarks" ? <p className="helper-text">第 3 页：研究背景<br />2026-05-08</p> : null}
         </div>
       ) : null}
       <div ref={canvasStageRef} className="canvas-stage">
-        {pdf && pageNumber > 1 ? <AdjacentPdfPage label="Previous page" pageNumber={pageNumber - 1} pdf={pdf} scale={scale} onOpen={() => setPageNumber(pageNumber - 1)} /> : null}
+        {pdf && pageNumber > 1 ? <AdjacentPdfPage label="上一页" pageNumber={pageNumber - 1} pdf={pdf} scale={scale} onOpen={() => setPageNumber(pageNumber - 1)} /> : null}
         <div ref={pageLayerRef} className="page-layer" onDoubleClick={handleCreateNote} style={{ width: pageSize.width || undefined, height: pageSize.height || undefined }}>
           <canvas ref={canvasRef} />
           <div ref={textLayerRef} className="text-layer" onMouseUp={() => void handleCreateHighlight()} />
@@ -1108,24 +1111,24 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
             </svg>
           ) : null}
         </div>
-        {pdf && pageNumber < pdf.numPages ? <AdjacentPdfPage label="Next page" pageNumber={pageNumber + 1} pdf={pdf} scale={scale} onOpen={() => setPageNumber(pageNumber + 1)} /> : null}
+        {pdf && pageNumber < pdf.numPages ? <AdjacentPdfPage label="下一页" pageNumber={pageNumber + 1} pdf={pdf} scale={scale} onOpen={() => setPageNumber(pageNumber + 1)} /> : null}
       </div>
       <aside className={mobilePanel === "annotations" ? "annotation-panel mobile-open" : "annotation-panel"}>
         <div>
-          <p className="eyebrow">Annotations</p>
-          <h3>{annotationList.length ? `${annotationList.length} total · ${visibleNotes.length + visibleHighlights.length} on this page` : "No annotations yet"}</h3>
-          <p className="helper-text">Select text to highlight it. Double-click the page to add a note.</p>
+          <p className="eyebrow">标注</p>
+          <h3>{annotationList.length ? `共 ${annotationList.length} 条 · 本页 ${visibleNotes.length + visibleHighlights.length} 条` : "暂无标注"}</h3>
+          <p className="helper-text">选中文字可高亮，双击页面可添加批注。</p>
         </div>
 
         <div className="annotation-tools">
           <div className="annotation-filters" aria-label="Filter annotations">
-            <Button variant="ghost" className={annotationFilter === "all" ? "active" : undefined} onClick={() => setAnnotationFilter("all")}>All {annotations.length}</Button>
-            <Button variant="ghost" className={annotationFilter === "highlight" ? "active" : undefined} onClick={() => setAnnotationFilter("highlight")}>Highlights {highlightCount}</Button>
-            <Button variant="ghost" className={annotationFilter === "text_note" ? "active" : undefined} onClick={() => setAnnotationFilter("text_note")}>Notes {noteCount}</Button>
+            <Button variant="ghost" className={annotationFilter === "all" ? "active" : undefined} onClick={() => setAnnotationFilter("all")}>全部 {annotations.length}</Button>
+            <Button variant="ghost" className={annotationFilter === "highlight" ? "active" : undefined} onClick={() => setAnnotationFilter("highlight")}>高亮 {highlightCount}</Button>
+            <Button variant="ghost" className={annotationFilter === "text_note" ? "active" : undefined} onClick={() => setAnnotationFilter("text_note")}>批注 {noteCount}</Button>
           </div>
           <Input
             aria-label="Search annotations"
-            placeholder="Search annotations"
+            placeholder="搜索标注内容"
             value={annotationSearch}
             onChange={(event) => setAnnotationSearch(event.target.value)}
           />
@@ -1133,7 +1136,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
         {selectedAnnotation?.type === "text_note" ? (
           <article className="selected-note">
-            <strong>Selected note</strong>
+            <strong>当前批注</strong>
             <AnnotationEditor
               color={editingColor}
               note={editingNote}
@@ -1142,13 +1145,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
               onSave={() => void handleSaveSelectedAnnotation()}
               onDelete={() => void handleDeleteAnnotation(selectedAnnotation.id)}
               saving={annotationStatus === "saving"}
-              deleteLabel="Delete note"
+              deleteLabel="删除批注"
             />
           </article>
         ) : null}
         {selectedAnnotation?.type === "highlight" ? (
           <article className="selected-note highlight-note">
-            <strong>Selected highlight</strong>
+            <strong>当前高亮</strong>
             <p>{selectedAnnotation.text}</p>
             <AnnotationEditor
               color={editingColor}
@@ -1158,13 +1161,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
               onSave={() => void handleSaveSelectedAnnotation()}
               onDelete={() => void handleDeleteAnnotation(selectedAnnotation.id)}
               saving={annotationStatus === "saving"}
-              deleteLabel="Delete highlight"
+              deleteLabel="删除高亮"
             />
           </article>
         ) : null}
 
         <div className="note-list">
-          {filteredAnnotationList.length === 0 ? <p className="helper-text">No annotations match the current filter.</p> : null}
+          {filteredAnnotationList.length === 0 ? <p className="helper-text">当前筛选条件下没有标注。</p> : null}
           {filteredAnnotationList.map((annotation, index) => (
             <Button
               variant="ghost"
@@ -1172,7 +1175,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
               key={annotation.id}
               onClick={() => jumpToAnnotation(annotation)}
             >
-              <span>{annotation.type === "highlight" ? "Highlight" : "Note"} {index + 1} · Page {annotation.page}</span>
+              <span>{annotation.type === "highlight" ? "高亮" : "批注"} {index + 1} · 第 {annotation.page} 页</span>
               <small>{annotation.text ?? annotation.note}</small>
             </Button>
           ))}
@@ -1181,13 +1184,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
       {pdf ? (
         <div className="mobile-reader-actions" aria-label="Reader actions">
-          <Button variant="ghost" onClick={() => setMobilePanel((current) => (current === "nav" ? null : "nav"))}>Contents</Button>
+          <Button variant="ghost" onClick={() => setMobilePanel((current) => (current === "nav" ? null : "nav"))}>目录</Button>
           <Button variant="ghost" onClick={() => {
             setMobilePanel((current) => (current === "search" ? null : "search"));
             window.setTimeout(() => searchInputRef.current?.focus(), 0);
-          }}>Search</Button>
+          }}>搜索</Button>
           <Button variant="ghost" onClick={() => setMobilePanel(null)}>{pageNumber} / {pdf.numPages}</Button>
-          <Button variant="ghost" onClick={() => setMobilePanel((current) => (current === "annotations" ? null : "annotations"))}>Notes</Button>
+          <Button variant="ghost" onClick={() => setMobilePanel((current) => (current === "annotations" ? null : "annotations"))}>标注</Button>
         </div>
       ) : null}
 
@@ -1200,16 +1203,16 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
             }}
           >
             <DialogHeader>
-              <DialogTitle>Add page note</DialogTitle>
-              <DialogDescription>Write a note for this exact position on page {noteDraftInput?.page ?? pageNumber}.</DialogDescription>
+              <DialogTitle>添加页面批注</DialogTitle>
+              <DialogDescription>为第 {noteDraftInput?.page ?? pageNumber} 页的当前位置添加笔记。</DialogDescription>
             </DialogHeader>
             <Label className="dialog-field">
-              Note
+              批注
               <Textarea autoFocus value={noteDraftText} onChange={(event) => setNoteDraftText(event.target.value)} rows={5} />
             </Label>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setNoteDraftInput(null)}>Cancel</Button>
-              <Button type="submit" disabled={!noteDraftText.trim() || annotationStatus === "saving"}>Add note</Button>
+              <Button type="button" variant="outline" onClick={() => setNoteDraftInput(null)}>取消</Button>
+              <Button type="submit" disabled={!noteDraftText.trim() || annotationStatus === "saving"}>添加批注</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -1262,10 +1265,25 @@ function AdjacentPdfPage({
 
   return (
     <Button variant="ghost" className="adjacent-page" onClick={onOpen} type="button">
-      <span>{label} · Page {pageNumber}</span>
+      <span>{label} · 第 {pageNumber} 页</span>
       <canvas ref={canvasRef} />
     </Button>
   );
+}
+
+function formatReaderStatus(status: "idle" | "syncing" | "synced" | "failed") {
+  if (status === "syncing") return "同步中";
+  if (status === "synced") return "已同步";
+  if (status === "failed") return "同步失败";
+  return "就绪";
+}
+
+function formatAnnotationStatus(status: "idle" | "saving" | "queued" | "failed" | "conflict") {
+  if (status === "saving") return "保存中";
+  if (status === "queued") return "待同步";
+  if (status === "failed") return "同步失败";
+  if (status === "conflict") return "同步冲突";
+  return "已同步";
 }
 
 function AnnotationEditor({

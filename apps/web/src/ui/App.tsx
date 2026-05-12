@@ -46,8 +46,8 @@ export function App() {
   const syncCursorRef = useRef(new Date().toISOString());
   const selectedFileRef = useRef<FileRecord | null>(null);
   const { accessToken, refreshToken, userEmail, setSession, clearSession } = useAuthStore();
-  const [email, setEmail] = useState("demo@pagebridge.dev");
-  const [password, setPassword] = useState("pagebridge123");
+  const [email, setEmail] = useState("wincax@hotmail.com");
+  const [password, setPassword] = useState("admin123");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
   const [fileSyncStatus, setFileSyncStatus] = useState<"idle" | "queued" | "syncing" | "failed">("idle");
@@ -391,27 +391,42 @@ export function App() {
   const filteredFiles = fileSearch.trim()
     ? files.filter((file) => file.name.toLowerCase().includes(fileSearch.trim().toLowerCase()))
     : files;
+  const pageTitle = getPageTitle(location.pathname);
 
   if (!accessToken) {
     if (location.pathname !== "/login") return <Navigate to="/login" replace />;
     return (
       <main className="auth-shell">
+        <section className="auth-brand-panel" aria-label="阅迹产品介绍">
+          <div className="brand-mark">阅</div>
+          <div>
+            <p className="eyebrow">阅迹</p>
+            <h1>跨平台 PDF 阅读、标注与同步工具</h1>
+          </div>
+          <ul>
+            <li>PDF 在线阅读</li>
+            <li>高亮、批注、笔记</li>
+            <li>多端同步阅读进度</li>
+            <li>云端保存标注</li>
+          </ul>
+        </section>
         <section className="auth-panel">
-          <p className="eyebrow">PageBridge MVP</p>
-          <h1>Read, mark, and continue from anywhere.</h1>
-          <p className="lede">This build wires the Web client to the NestJS API, Prisma, PostgreSQL, Redis, and S3-compatible storage foundation.</p>
+          <p className="eyebrow">欢迎回来</p>
+          <h1>登录阅迹</h1>
+          <p className="lede">继续阅读你的 PDF 与标注</p>
           <Label>
-            Email
-            <Input value={email} onChange={(event) => setEmail(event.target.value)} />
+            邮箱
+            <Input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="your@email.com" />
           </Label>
           <Label>
-            Password
-            <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            密码
+            <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" />
           </Label>
           <div className="button-row">
-            <Button onClick={() => authMutation.mutate("login")} disabled={authMutation.isPending}>Log in</Button>
-            <Button variant="outline" onClick={() => authMutation.mutate("register")} disabled={authMutation.isPending}>Create account</Button>
+            <Button onClick={() => authMutation.mutate("login")} disabled={authMutation.isPending}>登录</Button>
+            <Button variant="outline" onClick={() => authMutation.mutate("register")} disabled={authMutation.isPending}>创建账号</Button>
           </div>
+          <button className="forgot-link" type="button">忘记密码？</button>
           {authMutation.error ? <p className="error">{authMutation.error.message}</p> : null}
         </section>
       </main>
@@ -420,31 +435,50 @@ export function App() {
 
   if (location.pathname === "/" || location.pathname === "/login") return <Navigate to="/library" replace />;
 
+  if (readerMatch) {
+    return activeFile ? (
+      <main className="reader-route-shell">
+        <Suspense fallback={<section className="reader-placeholder"><p>正在加载阅读器...</p></section>}>
+          <PdfReader token={accessToken} file={activeFile} syncPulse={syncPulse} />
+        </Suspense>
+      </main>
+    ) : (
+      <main className="reader-route-shell">
+        <section className="reader-placeholder missing-reader">
+          <p className="eyebrow">阅读器</p>
+          <h2>未找到 PDF</h2>
+          <p>请返回文件库选择一个 PDF，或上传新的文档。</p>
+          <Button onClick={() => navigate("/library")}>返回文件库</Button>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className="app-shell">
+    <main className={location.pathname === "/settings" ? "app-shell route-settings" : "app-shell"}>
       <aside className="sidebar">
         <div className="sidebar-stack">
           <div className="brand-block">
-            <p className="eyebrow">PageBridge</p>
+            <div className="brand-mark small">阅</div>
             <h2>阅迹</h2>
-            <span>PDF reading, annotation, and sync workspace</span>
+            <span>跨平台 PDF 阅读、标注与同步工具</span>
           </div>
           <nav className="sidebar-nav" aria-label="Primary">
             <div>
-              <p>Documents</p>
-              <NavLink to="/library">My documents</NavLink>
-              <NavLink to="/recent">Recent reading</NavLink>
-              <NavLink to="/annotations">My annotations</NavLink>
-              <NavLink to="/favorites">Favorites</NavLink>
+              <p>文档</p>
+              <NavLink to="/library">我的文档</NavLink>
+              <NavLink to="/recent">最近阅读</NavLink>
+              <NavLink to="/favorites">收藏文档</NavLink>
+              <NavLink to="/annotations">我的标注</NavLink>
             </div>
             <div>
-              <p>Manage</p>
-              <NavLink to="/trash">Trash</NavLink>
-              <NavLink to="/settings">Settings</NavLink>
+              <p>管理</p>
+              <NavLink to="/trash">回收站</NavLink>
+              <NavLink to="/settings">设置</NavLink>
             </div>
           </nav>
           <div className="account-card">
-            <p className="eyebrow">Signed in</p>
+            <p className="eyebrow">当前账号</p>
             <strong>{userEmail}</strong>
           </div>
           {storageUsageQuery.data ? (
@@ -456,43 +490,51 @@ export function App() {
             />
           ) : null}
         </div>
-        <Button variant="outline" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>Sign out</Button>
+        <Button variant="outline" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>退出登录</Button>
       </aside>
 
       <section className="library">
         <header className="toolbar">
           <div>
             <p className="eyebrow">Library</p>
-            <h1>My documents</h1>
+            <h1>{pageTitle}</h1>
           </div>
-          <div className="toolbar-status"><span /> Synced</div>
+          <Label className="global-search">
+            <span className="sr-only">搜索</span>
+            <Input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="搜索文件、标注或笔记" />
+          </Label>
+          <div className="toolbar-status"><span /> 已同步</div>
           <div className="create-file">
-            <Button onClick={() => setUploadDialogOpen(true)} disabled={uploadMutation.isPending}>{uploadMutation.isPending ? "Uploading..." : "Upload PDF"}</Button>
+            <Button onClick={() => setUploadDialogOpen(true)} disabled={uploadMutation.isPending}>{uploadMutation.isPending ? "正在上传..." : "上传 PDF"}</Button>
           </div>
+          <div className="avatar" aria-hidden="true">A</div>
         </header>
 
-        <div className="content-grid">
+        <div className={location.pathname === "/settings" ? "content-grid library-grid-mode settings-route-mode" : "content-grid library-grid-mode"}>
           <section className="file-list">
             <Label className="file-search">
-              Search files
-              <Input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="Filter by PDF name" />
+              搜索文件
+              <Input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="按 PDF 名称筛选" />
             </Label>
-            {filesQuery.isLoading ? <p>Loading files...</p> : null}
+            {filesQuery.isLoading ? <p>正在加载文件...</p> : null}
             {fileActionError ? <p className="error">{fileActionError}</p> : null}
             {fileSyncStatus === "queued" || fileSyncStatus === "failed" ? (
-              <Button className="retry-button" size="sm" onClick={() => void replayPendingFileChanges()}>Retry file sync</Button>
+              <Button className="retry-button" size="sm" onClick={() => void replayPendingFileChanges()}>重试文件同步</Button>
             ) : null}
-            {fileSyncStatus === "syncing" ? <p className="sync-line">File changes syncing...</p> : null}
-            {files.length === 0 && !filesQuery.isLoading ? <p>No PDFs yet. Upload one to start reading and annotating.</p> : null}
-            {files.length > 0 && filteredFiles.length === 0 ? <p>No PDFs match “{fileSearch}”.</p> : null}
+            {fileSyncStatus === "syncing" ? <p className="sync-line">文件变更同步中...</p> : null}
+            {files.length === 0 && !filesQuery.isLoading ? <EmptyLibrary onUpload={() => setUploadDialogOpen(true)} /> : null}
+            {files.length > 0 && filteredFiles.length === 0 ? <p>没有匹配“{fileSearch}”的 PDF。</p> : null}
             {filteredFiles.map((file) => (
-              <article className={activeFile?.id === file.id ? "file-row selected" : "file-row"} key={file.id} onClick={() => {
+              <article className={activeFile?.id === file.id ? "file-card selected" : "file-card"} key={file.id} onClick={() => {
                 setSelectedFile(file);
                 navigate(`/reader/${file.id}`);
               }}>
-                <div>
+                <div className="pdf-cover" aria-hidden="true">PDF</div>
+                <div className="file-card-body">
                   <strong>{file.name}</strong>
                   <span>{formatFileMeta(file)}</span>
+                  <span>最近阅读：第 1 页</span>
+                  <span>标注：0 条</span>
                 </div>
                 <div className="file-actions">
                   <Button
@@ -504,7 +546,7 @@ export function App() {
                     }}
                     disabled={renameFileMutation.isPending || deleteFileMutation.isPending}
                   >
-                    Rename
+                    重命名
                   </Button>
                   <Button
                     variant="link"
@@ -515,63 +557,47 @@ export function App() {
                     }}
                     disabled={renameFileMutation.isPending || deleteFileMutation.isPending}
                   >
-                    Delete
+                    删除
                   </Button>
                 </div>
+                <Button className="continue-button" size="sm" onClick={(event) => {
+                  event.stopPropagation();
+                  setSelectedFile(file);
+                  navigate(`/reader/${file.id}`);
+                }}>继续阅读</Button>
               </article>
             ))}
           </section>
 
           {location.pathname === "/settings" ? (
-            <section className="reader-placeholder settings-page">
-              <p className="eyebrow">Settings</p>
-              <h2>Account and reading preferences</h2>
-              <div className="settings-grid">
-                <article>
-                  <strong>Account</strong>
-                  <p>{userEmail}</p>
-                </article>
-                <article>
-                  <strong>Storage</strong>
-                  <p>{storageUsageQuery.data ? `${storageUsageQuery.data.fileCount} of ${storageUsageQuery.data.fileCountQuota} files` : "Loading usage..."}</p>
-                </article>
-                <article>
-                  <strong>Sync</strong>
-                  <p>Reading progress and annotations sync automatically.</p>
-                </article>
-                <article>
-                  <strong>Shortcuts</strong>
-                  <p>Use / for search, arrow keys for pages, Ctrl +/- for zoom.</p>
-                </article>
-              </div>
-            </section>
+            <SettingsPage
+              userEmail={userEmail}
+              fileCount={storageUsageQuery.data?.fileCount}
+              fileCountQuota={storageUsageQuery.data?.fileCountQuota}
+            />
           ) : location.pathname === "/recent" ? (
             <section className="reader-placeholder settings-page">
-              <p className="eyebrow">Recent</p>
-              <h2>Continue reading</h2>
-              <p>Select a PDF from your library to continue from the latest synced page.</p>
+              <p className="eyebrow">最近阅读</p>
+              <h2>继续上次阅读</h2>
+              <p>这里会汇总最近打开的 PDF。当前版本可先从“我的文档”选择文件继续阅读。</p>
             </section>
           ) : location.pathname === "/annotations" ? (
             <section className="reader-placeholder settings-page">
-              <p className="eyebrow">Annotations</p>
-              <h2>My annotations</h2>
-              <p>Open a PDF to review highlights and notes for that file.</p>
+              <p className="eyebrow">我的标注</p>
+              <h2>标注汇总</h2>
+              <p>这里会集中展示所有 PDF 的高亮、批注和笔记。请先打开 PDF 查看当前文档标注。</p>
             </section>
           ) : location.pathname === "/favorites" || location.pathname === "/trash" ? (
             <section className="reader-placeholder settings-page">
-              <p className="eyebrow">Coming soon</p>
-              <h2>{location.pathname === "/trash" ? "Trash" : "Favorites"}</h2>
-              <p>This page is reserved for the next product phase.</p>
+              <p className="eyebrow">占位页面</p>
+              <h2>{location.pathname === "/trash" ? "回收站" : "收藏文档"}</h2>
+              <p>该页面已按 Figma 导航预留，后续接入对应业务数据。</p>
             </section>
-          ) : activeFile ? (
-            <Suspense fallback={<section className="reader-placeholder"><p>Loading reader...</p></section>}>
-              <PdfReader token={accessToken} file={activeFile} syncPulse={syncPulse} />
-            </Suspense>
           ) : (
             <section className="reader-placeholder">
-              <p className="eyebrow">Reader</p>
-              <h2>Select a PDF</h2>
-              <p>Choose a file from your library to load the PDF reader.</p>
+              <p className="eyebrow">文件库</p>
+              <h2>选择一个 PDF 开始阅读</h2>
+              <p>从左侧文档卡片进入阅读器，或上传新的 PDF。</p>
             </section>
           )}
         </div>
@@ -580,17 +606,17 @@ export function App() {
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
         <DialogContent className="app-dialog upload-dialog">
           <DialogHeader>
-            <DialogTitle>Upload PDF</DialogTitle>
-            <DialogDescription>Choose a PDF from your computer. Files up to 200MB are supported.</DialogDescription>
+            <DialogTitle>上传 PDF</DialogTitle>
+            <DialogDescription>选择电脑中的 PDF 文件，最大支持 200MB。</DialogDescription>
           </DialogHeader>
           <Label
             className="upload-dropzone"
             onDragOver={(event) => event.preventDefault()}
             onDrop={handleUploadDrop}
           >
-            <span>Drag a PDF here</span>
-            <small>or click to choose a file</small>
-            <em>.pdf only · max 200MB</em>
+            <span>拖拽 PDF 文件到这里</span>
+            <small>或点击选择文件</small>
+            <em>支持 .pdf，最大 200MB</em>
             <input
               type="file"
               accept="application/pdf"
@@ -606,7 +632,7 @@ export function App() {
             />
           </Label>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setUploadDialogOpen(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => setUploadDialogOpen(false)}>取消</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -620,16 +646,16 @@ export function App() {
             }}
           >
             <DialogHeader>
-              <DialogTitle>Rename PDF</DialogTitle>
-              <DialogDescription>Give this file a clear library name. The PDF itself will not be modified.</DialogDescription>
+              <DialogTitle>重命名 PDF</DialogTitle>
+              <DialogDescription>为文件设置清晰的资料库名称，不会修改 PDF 原文件。</DialogDescription>
             </DialogHeader>
             <Label className="dialog-field">
-              File name
+              文件名
               <Input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} />
             </Label>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setRenameTarget(null)}>Cancel</Button>
-              <Button type="submit" disabled={!renameValue.trim() || renameValue.trim() === renameTarget?.name}>Save name</Button>
+              <Button type="button" variant="outline" onClick={() => setRenameTarget(null)}>取消</Button>
+              <Button type="submit" disabled={!renameValue.trim() || renameValue.trim() === renameTarget?.name}>保存名称</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -638,33 +664,112 @@ export function App() {
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent className="app-dialog">
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this PDF?</AlertDialogTitle>
+            <AlertDialogTitle>删除这个 PDF？</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget ? `${deleteTarget.name} will be removed from your library. This action can sync to other devices.` : "This file will be removed from your library."}
+              {deleteTarget ? `${deleteTarget.name} 将从文件库移除，并同步到其他设备。` : "该文件将从文件库移除。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="danger-action" onClick={() => deleteTarget && void handleDeleteFile(deleteTarget)}>Delete PDF</AlertDialogAction>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction className="danger-action" onClick={() => deleteTarget && void handleDeleteFile(deleteTarget)}>删除 PDF</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       <nav className="mobile-tabbar" aria-label="Mobile navigation">
-        <NavLink to="/library">Docs</NavLink>
-        <NavLink to="/recent">Recent</NavLink>
-        <NavLink to="/annotations">Notes</NavLink>
-        <NavLink to="/settings">Me</NavLink>
+        <NavLink to="/library">文档</NavLink>
+        <NavLink to="/recent">最近</NavLink>
+        <NavLink to="/annotations">标注</NavLink>
+        <NavLink to="/settings">我的</NavLink>
       </nav>
     </main>
   );
 }
 
+function SettingsPage({ userEmail, fileCount, fileCountQuota }: { userEmail: string | null; fileCount?: number; fileCountQuota?: number }) {
+  const initials = userEmail?.slice(0, 1).toUpperCase() || "P";
+  const usageLabel = fileCount !== undefined && fileCountQuota !== undefined ? `${fileCount} / ${fileCountQuota} 个文件` : "用量占位符";
+
+  return (
+    <section className="reader-placeholder settings-page plant-settings" aria-label="移动端设置">
+      <div className="settings-hero">
+        <div className="settings-avatar" aria-hidden="true">{initials}</div>
+        <div>
+          <p className="eyebrow">Plant Care</p>
+          <h2>Settings</h2>
+          <span>{userEmail || "plantlover@example.com"}</span>
+        </div>
+      </div>
+
+      <article className="plant-care-card">
+        <div>
+          <strong>Keep your garden thriving</strong>
+          <p>护理提醒、同步与高级植物识别将在这里配置。</p>
+        </div>
+        <span>占位</span>
+      </article>
+
+      <div className="settings-section">
+        <p>Care Preferences</p>
+        <SettingsRow label="Watering reminders" detail="每天 08:00" active />
+        <SettingsRow label="Fertilizing schedule" detail="占位符" />
+        <SettingsRow label="Plant location" detail="Living room" />
+      </div>
+
+      <div className="settings-section">
+        <p>App Settings</p>
+        <SettingsRow label="Notifications" detail="已开启" active />
+        <SettingsRow label="Cloud sync" detail="自动同步" active />
+        <SettingsRow label="Storage" detail={usageLabel} />
+      </div>
+
+      <div className="settings-section">
+        <p>Account</p>
+        <SettingsRow label="Profile" detail="编辑资料" />
+        <SettingsRow label="Help center" detail="占位符" />
+      </div>
+    </section>
+  );
+}
+
+function SettingsRow({ label, detail, active = false }: { label: string; detail: string; active?: boolean }) {
+  return (
+    <article className="settings-row">
+      <span aria-hidden="true" className={active ? "settings-row-icon active" : "settings-row-icon"} />
+      <div>
+        <strong>{label}</strong>
+        <small>{detail}</small>
+      </div>
+      <span className="settings-row-arrow" aria-hidden="true">&gt;</span>
+    </article>
+  );
+}
+
 function formatFileMeta(file: FileRecord) {
   const size = Number(file.sizeBytes);
-  const sizeLabel = Number.isFinite(size) && size > 0 ? `${(size / 1024 / 1024).toFixed(1)} MB` : "Size unknown";
-  const pageLabel = file.pageCount ? `${file.pageCount} pages` : "Pages unknown";
+  const sizeLabel = Number.isFinite(size) && size > 0 ? `${(size / 1024 / 1024).toFixed(1)} MB` : "大小未知";
+  const pageLabel = file.pageCount ? `${file.pageCount} 页` : "页数未知";
   return `${pageLabel} · ${sizeLabel}`;
+}
+
+function getPageTitle(pathname: string) {
+  if (pathname === "/recent") return "最近阅读";
+  if (pathname === "/favorites") return "收藏文档";
+  if (pathname === "/annotations") return "我的标注";
+  if (pathname === "/trash") return "回收站";
+  if (pathname === "/settings") return "设置";
+  return "我的文档";
+}
+
+function EmptyLibrary({ onUpload }: { onUpload: () => void }) {
+  return (
+    <div className="empty-library">
+      <div className="empty-file-icon">PDF</div>
+      <h2>还没有 PDF 文件</h2>
+      <p>上传你的第一份 PDF，开始阅读和标注。</p>
+      <Button onClick={onUpload}>上传 PDF</Button>
+    </div>
+  );
 }
 
 function StorageUsage({ usedBytes, quotaBytes, fileCount, fileCountQuota }: { usedBytes: string; quotaBytes: string; fileCount: number; fileCountQuota: number }) {
@@ -675,8 +780,8 @@ function StorageUsage({ usedBytes, quotaBytes, fileCount, fileCountQuota }: { us
   return (
     <div className="storage-usage">
       <div className="storage-usage-bar"><span style={{ width: `${percent}%` }} /></div>
-      <p>{formatBytes(used)} of {formatBytes(quota)} used</p>
-      <p>{fileCount} of {fileCountQuota} files</p>
+      <p>已用 {formatBytes(used)} / {formatBytes(quota)}</p>
+      <p>{fileCount} / {fileCountQuota} 个文件</p>
     </div>
   );
 }
