@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, Clock, Cloud, FileText, Grid3X3, HardDrive, Highlighter, Keyboard, List, LogOut, MoreVertical, PenLine, RefreshCcw, Search, Settings, Shield, Star, Trash2, Upload, User } from "lucide-react";
+import { AlertCircle, ArrowLeft, BookOpen, Bookmark, CheckCircle2, ChevronRight, Clock, Cloud, FileText, Grid3X3, HardDrive, Highlighter, Keyboard, List, LogOut, MoreVertical, PenLine, RefreshCcw, Search, Settings, Shield, Star, Trash2, Upload, User } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState, type DragEvent } from "react";
 import { Navigate, NavLink, matchPath, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -529,11 +529,36 @@ export function App() {
         </div>
       </aside>
 
-      <section className="library">
+      <section className={`library route-${location.pathname.slice(1) || "library"}`}>
+        {location.pathname === "/library" ? (
+          <div className="mobile-library-head">
+            <header>
+              <h1>阅迹</h1>
+              <div className="mobile-avatar">U</div>
+            </header>
+            <Label className="mobile-search">
+              <Search size={20} aria-hidden="true" />
+              <Input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="搜索文件、标注或笔记" />
+            </Label>
+            <section className="mobile-recent-card">
+              <p>最近阅读</p>
+              <article>
+                <strong>论文阅读.pdf</strong>
+                <span>第 8 / 56 页</span>
+                <span>上次阅读：今天 10:24</span>
+                <span>标注 16 条</span>
+                <Button onClick={() => filteredFiles[0] && navigate(`/reader/${filteredFiles[0].id}`)}>继续阅读</Button>
+              </article>
+            </section>
+          </div>
+        ) : null}
+        {location.pathname === "/recent" ? <MobileRecentPage onOpen={() => filteredFiles[0] && navigate(`/reader/${filteredFiles[0].id}`)} /> : null}
+        {location.pathname === "/annotations" ? <MobileAnnotationsPage /> : null}
         <div className={location.pathname === "/settings" ? "content-grid library-grid-mode settings-route-mode" : "content-grid library-grid-mode"}>
           <section className={`file-list ${effectiveDocumentView === "list" ? "list-view" : "grid-view"}`}>
             <header className="library-heading">
               <h1>{pageTitle}</h1>
+              <Button className="mobile-upload-button" variant="ghost" onClick={() => setUploadDialogOpen(true)}><Upload size={16} />上传 PDF</Button>
               <div className="view-toggle" aria-label="切换文档视图">
                 <button className={effectiveDocumentView === "grid" ? "active" : ""} type="button" onClick={() => setDocumentView("grid")} aria-label="网格视图"><Grid3X3 size={18} /></button>
                 <button className={effectiveDocumentView === "list" ? "active" : ""} type="button" onClick={() => setDocumentView("list")} aria-label="列表视图"><List size={18} /></button>
@@ -613,7 +638,7 @@ export function App() {
             onDragOver={(event) => event.preventDefault()}
             onDrop={handleUploadDrop}
           >
-            <span>拖拽 PDF 文件到这里</span>
+            <span>从文件中选择 PDF</span>
             <small>或点击选择文件</small>
             <em>支持 .pdf，最大 200MB</em>
             <input
@@ -676,10 +701,10 @@ export function App() {
       </AlertDialog>
 
       <nav className="mobile-tabbar" aria-label="Mobile navigation">
-        <NavLink to="/library">文档</NavLink>
-        <NavLink to="/recent">最近</NavLink>
-        <NavLink to="/annotations">标注</NavLink>
-        <NavLink to="/settings">我的</NavLink>
+        <NavLink to="/library"><FileText size={20} />文档</NavLink>
+        <NavLink to="/recent"><Clock size={20} />最近</NavLink>
+        <NavLink to="/annotations"><Bookmark size={20} />标注</NavLink>
+        <NavLink to="/settings"><User size={20} />我的</NavLink>
       </nav>
     </main>
   );
@@ -724,6 +749,31 @@ function SettingsPage({
 
   return (
     <main className="settings-shell">
+      <section className="mobile-mine-page">
+        <h1>我的</h1>
+        <article className="mobile-profile-card">
+          <div className="mobile-profile-avatar">{initials}</div>
+          <div><strong>用户昵称</strong><span>{userEmail || "user@email.com"}</span></div>
+        </article>
+        <article className="mobile-storage-card">
+          <span>存储空间</span>
+          <strong>238MB / 2GB</strong>
+          <div><span /></div>
+        </article>
+        <nav className="mobile-settings-list">
+          <button type="button">阅读设置<ChevronRight size={20} /></button>
+          <button type="button">同步设置<ChevronRight size={20} /></button>
+          <button type="button">账号安全<ChevronRight size={20} /></button>
+          <button type="button">关于阅迹<ChevronRight size={20} /></button>
+        </nav>
+        <Button className="mobile-logout-button" variant="outline" onClick={onLogout} disabled={logoutPending}><LogOut size={18} />退出登录</Button>
+        <nav className="mobile-tabbar" aria-label="Mobile navigation">
+          <NavLink to="/library"><FileText size={20} />文档</NavLink>
+          <NavLink to="/recent"><Clock size={20} />最近</NavLink>
+          <NavLink to="/annotations"><Bookmark size={20} />标注</NavLink>
+          <NavLink to="/settings"><User size={20} />我的</NavLink>
+        </nav>
+      </section>
       <header className="settings-topbar">
         <button type="button" onClick={onBack}><ArrowLeft size={18} />返回文件库</button>
         <h1>设置</h1>
@@ -836,6 +886,59 @@ function SettingsToggle({ title, detail }: { title: string; detail: string }) {
 
 function ShortcutRow({ label, value }: { label: string; value: string }) {
   return <div className="shortcut-row"><span>{label}</span><kbd>{value}</kbd></div>;
+}
+
+function MobileRecentPage({ onOpen }: { onOpen: () => void }) {
+  return (
+    <section className="mobile-simple-page mobile-recent-page">
+      <h1>最近阅读</h1>
+      <MobileContinueCard title="论文阅读.pdf" page="第 8 / 56 页" time="上次阅读：今天 10:24" notes="标注 16 条" onOpen={onOpen} />
+      <MobileContinueCard title="产品需求.pdf" page="第 12 / 24 页" time="上次阅读：昨天 15:30" notes="标注 8 条" onOpen={onOpen} />
+    </section>
+  );
+}
+
+function MobileContinueCard({ title, page, time, notes, onOpen }: { title: string; page: string; time: string; notes: string; onOpen: () => void }) {
+  return (
+    <article className="mobile-continue-card">
+      <strong>{title}</strong>
+      <span>{page}</span>
+      <span>{time}</span>
+      <span>{notes}</span>
+      <Button onClick={onOpen}>继续阅读</Button>
+    </article>
+  );
+}
+
+function MobileAnnotationsPage() {
+  return (
+    <section className="mobile-simple-page mobile-annotations-page">
+      <h1>我的标注</h1>
+      <Label className="mobile-search annotation-mobile-search">
+        <Search size={20} aria-hidden="true" />
+        <Input placeholder="搜索标注或笔记" />
+      </Label>
+      <div className="mobile-chip-row">
+        <button className="active" type="button">全部</button>
+        <button type="button">高亮</button>
+        <button type="button">批注</button>
+        <button type="button">书签</button>
+      </div>
+      <MobileAnnotationCard title="论文阅读.pdf · 第 8 页 · 高亮" highlight="这是一段被高亮的原文，包含了核心观点和重要内容..." note="这里是重点" synced />
+      <MobileAnnotationCard title="产品需求.pdf · 第 12 页 · 批注" highlight="关键功能需求说明..." note="需要重点关注的功能点" />
+    </section>
+  );
+}
+
+function MobileAnnotationCard({ title, highlight, note, synced }: { title: string; highlight: string; note: string; synced?: boolean }) {
+  return (
+    <article className="mobile-annotation-card">
+      <header><span>{title}</span><MoreVertical size={18} /></header>
+      <mark>{highlight}</mark>
+      <p>备注：{note}</p>
+      <small>{synced ? "✓ 已同步" : "◌ 同步中..."}</small>
+    </article>
+  );
 }
 
 function TrashPage({ onBack }: { onBack: () => void }) {
