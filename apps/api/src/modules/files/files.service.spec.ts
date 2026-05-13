@@ -2,20 +2,44 @@ import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { FilesService } from "./files.service";
 
-function createService(overrides: { contentLength?: number; contentType?: string } = {}) {
+const deletedFile = {
+  id: "file-1",
+  userId: "user-1",
+  name: "paper.pdf",
+  sizeBytes: BigInt(1234),
+  mimeType: "application/pdf",
+  storageKey: "users/user-1/files/file-1.pdf",
+  pageCount: null,
+  deletedAt: new Date(),
+  createdAt: new Date(),
+  updatedAt: new Date()
+};
+
+function createService(overrides: {
+  contentLength?: number;
+  contentType?: string;
+  fileCount?: number;
+  usedBytes?: bigint;
+  deletedFiles?: Array<{ id: string; storageKey: string }>;
+  deleteObject?: ReturnType<typeof vi.fn>;
+} = {}) {
   const prisma = {
     file: {
-      aggregate: vi.fn().mockResolvedValue({ _sum: { sizeBytes: BigInt(0) }, _count: { id: 0 } }),
-      count: vi.fn().mockResolvedValue(0),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { sizeBytes: overrides.usedBytes ?? BigInt(0) }, _count: { id: 0 } }),
+      count: vi.fn().mockResolvedValue(overrides.fileCount ?? 0),
       create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...data, pageCount: null, deletedAt: null, createdAt: new Date(), updatedAt: new Date() })),
-      findMany: vi.fn().mockResolvedValue([])
+      findFirst: vi.fn().mockResolvedValue(deletedFile),
+      findMany: vi.fn().mockResolvedValue(overrides.deletedFiles ?? []),
+      update: vi.fn().mockResolvedValue({ ...deletedFile, deletedAt: null }),
+      delete: vi.fn().mockResolvedValue(deletedFile)
     },
     syncChange: { create: vi.fn().mockResolvedValue({}) }
   };
   const redis = { limit: vi.fn().mockResolvedValue(undefined) };
   const storage = {
     buildUserFileKey: vi.fn((userId: string, fileId: string) => `users/${userId}/files/${fileId}.pdf`),
-    getObjectMetadata: vi.fn().mockResolvedValue({ ContentLength: overrides.contentLength ?? 1234, ContentType: overrides.contentType ?? "application/pdf" })
+    getObjectMetadata: vi.fn().mockResolvedValue({ ContentLength: overrides.contentLength ?? 1234, ContentType: overrides.contentType ?? "application/pdf" }),
+    deleteObject: overrides.deleteObject ?? vi.fn().mockResolvedValue(undefined)
   };
 
   return {
@@ -63,5 +87,39 @@ describe("FilesService.completeUpload", () => {
       storageKey: "users/user-1/files/file-1.pdf"
     })).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.file.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("FilesService trash operations", () => {
+  it("checks storage quota before restoring a deleted file", async () => {
+    const { service, prisma } = createService({ usedBytes: BigInt(1024 * 1024 * 1024) });
+
+    await expect(service.restore("user-1", "file-1")).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.file.update).not.toHaveBeenCalled();
+  });
+
+  it("deletes the database row even when the stored object is already missing", async () => {
+    const deleteObject = vi.fn().mockRejectedValue(new Error("missing object"));
+    const { service, prisma, storage } = createService({ deleteObject });
+
+    await expect(service.permanentlyDelete("user-1", "file-1")).resolves.toEqual({ ok: true });
+
+    expect(storage.deleteObject).toHaveBeenCalledWith("users/user-1/files/file-1.pdf");
+    expect(prisma.file.delete).toHaveBeenCalledWith({ where: { id: "file-1" } });
+  });
+
+  it("deletes every trashed file when emptying trash", async () => {
+    const { service, prisma, storage } = createService({
+      deletedFiles: [
+        { id: "file-1", storageKey: "users/user-1/files/file-1.pdf" },
+        { id: "file-2", storageKey: "users/user-1/files/file-2.pdf" }
+      ]
+    });
+
+    await expect(service.emptyTrash("user-1")).resolves.toEqual({ ok: true, deletedCount: 2 });
+
+    expect(storage.deleteObject).toHaveBeenCalledTimes(2);
+    expect(prisma.file.delete).toHaveBeenCalledWith({ where: { id: "file-1" } });
+    expect(prisma.file.delete).toHaveBeenCalledWith({ where: { id: "file-2" } });
   });
 });

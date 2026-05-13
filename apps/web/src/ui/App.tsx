@@ -394,7 +394,11 @@ export function App() {
     ? files.filter((file) => file.name.toLowerCase().includes(fileSearch.trim().toLowerCase()))
     : files;
   const isFavoritesRoute = location.pathname === "/favorites";
-  const visibleFiles = isFavoritesRoute ? filteredFiles.slice(1, 2) : filteredFiles;
+  const visibleFiles = isFavoritesRoute ? [] : filteredFiles;
+  const emptyDocumentMessage = isFavoritesRoute
+    ? "暂无收藏文档。收藏功能接入后会显示你标记的 PDF。"
+    : `没有匹配“${fileSearch}”的 PDF。`;
+  const recentFiles = filteredFiles.slice(0, 2);
   const effectiveDocumentView = documentView;
   const pageTitle = getPageTitle(location.pathname);
 
@@ -542,17 +546,11 @@ export function App() {
             </Label>
             <section className="mobile-recent-card">
               <p>最近阅读</p>
-              <article>
-                <strong>论文阅读.pdf</strong>
-                <span>第 8 / 56 页</span>
-                <span>上次阅读：今天 10:24</span>
-                <span>标注 16 条</span>
-                <Button onClick={() => filteredFiles[0] && navigate(`/reader/${filteredFiles[0].id}`)}>继续阅读</Button>
-              </article>
+              {recentFiles[0] ? <MobileContinueCard file={recentFiles[0]} onOpen={() => navigate(`/reader/${recentFiles[0].id}`)} /> : <p className="mobile-empty-text">暂无最近阅读</p>}
             </section>
           </div>
         ) : null}
-        {location.pathname === "/recent" ? <MobileRecentPage onOpen={() => filteredFiles[0] && navigate(`/reader/${filteredFiles[0].id}`)} /> : null}
+        {location.pathname === "/recent" ? <MobileRecentPage files={recentFiles} onOpen={(file) => navigate(`/reader/${file.id}`)} /> : null}
         {location.pathname === "/annotations" ? <MobileAnnotationsPage /> : null}
         <div className={location.pathname === "/settings" ? "content-grid library-grid-mode settings-route-mode" : "content-grid library-grid-mode"}>
           <section className={`file-list ${effectiveDocumentView === "list" ? "list-view" : "grid-view"}`}>
@@ -571,7 +569,7 @@ export function App() {
             ) : null}
             {fileSyncStatus === "syncing" ? <p className="sync-line">文件变更同步中...</p> : null}
             {files.length === 0 && !filesQuery.isLoading ? <EmptyLibrary onUpload={() => setUploadDialogOpen(true)} /> : null}
-            {files.length > 0 && visibleFiles.length === 0 ? <p>没有匹配“{fileSearch}”的 PDF。</p> : null}
+            {files.length > 0 && visibleFiles.length === 0 ? <p>{emptyDocumentMessage}</p> : null}
             {visibleFiles.map((file) => (
               <article className={activeFile?.id === file.id ? "file-card selected" : "file-card"} key={file.id} onClick={() => {
                 setSelectedFile(file);
@@ -888,23 +886,24 @@ function ShortcutRow({ label, value }: { label: string; value: string }) {
   return <div className="shortcut-row"><span>{label}</span><kbd>{value}</kbd></div>;
 }
 
-function MobileRecentPage({ onOpen }: { onOpen: () => void }) {
+function MobileRecentPage({ files, onOpen }: { files: FileRecord[]; onOpen: (file: FileRecord) => void }) {
   return (
     <section className="mobile-simple-page mobile-recent-page">
       <h1>最近阅读</h1>
-      <MobileContinueCard title="论文阅读.pdf" page="第 8 / 56 页" time="上次阅读：今天 10:24" notes="标注 16 条" onOpen={onOpen} />
-      <MobileContinueCard title="产品需求.pdf" page="第 12 / 24 页" time="上次阅读：昨天 15:30" notes="标注 8 条" onOpen={onOpen} />
+      {files.length === 0 ? <p className="mobile-empty-text">暂无最近阅读</p> : null}
+      {files.map((file) => <MobileContinueCard file={file} key={file.id} onOpen={() => onOpen(file)} />)}
     </section>
   );
 }
 
-function MobileContinueCard({ title, page, time, notes, onOpen }: { title: string; page: string; time: string; notes: string; onOpen: () => void }) {
+function MobileContinueCard({ file, onOpen }: { file: FileRecord; onOpen: () => void }) {
+  const pageCount = file.pageCount ?? 1;
   return (
     <article className="mobile-continue-card">
-      <strong>{title}</strong>
-      <span>{page}</span>
-      <span>{time}</span>
-      <span>{notes}</span>
+      <strong>{file.name}</strong>
+      <span>第 1 / {pageCount} 页</span>
+      <span>上次阅读：{formatRelativeDate(file.updatedAt)}</span>
+      <span>标注 0 条</span>
       <Button onClick={onOpen}>继续阅读</Button>
     </article>
   );
@@ -924,20 +923,8 @@ function MobileAnnotationsPage() {
         <button type="button">批注</button>
         <button type="button">书签</button>
       </div>
-      <MobileAnnotationCard title="论文阅读.pdf · 第 8 页 · 高亮" highlight="这是一段被高亮的原文，包含了核心观点和重要内容..." note="这里是重点" synced />
-      <MobileAnnotationCard title="产品需求.pdf · 第 12 页 · 批注" highlight="关键功能需求说明..." note="需要重点关注的功能点" />
+      <p className="mobile-empty-text">暂无标注。打开文档并创建高亮、批注或书签后会显示在这里。</p>
     </section>
-  );
-}
-
-function MobileAnnotationCard({ title, highlight, note, synced }: { title: string; highlight: string; note: string; synced?: boolean }) {
-  return (
-    <article className="mobile-annotation-card">
-      <header><span>{title}</span><MoreVertical size={18} /></header>
-      <mark>{highlight}</mark>
-      <p>备注：{note}</p>
-      <small>{synced ? "✓ 已同步" : "◌ 同步中..."}</small>
-    </article>
   );
 }
 
@@ -1018,6 +1005,15 @@ function formatDeletedAt(file: DeletedFileRecord) {
   const days = Math.max(0, Math.floor((Date.now() - deletedAt) / (24 * 60 * 60 * 1000)));
   if (days === 0) return "今天删除";
   return `删除于 ${days} 天前`;
+}
+
+function formatRelativeDate(value: string) {
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return "时间未知";
+  const days = Math.floor((Date.now() - time) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return "今天";
+  if (days === 1) return "昨天";
+  return `${days} 天前`;
 }
 
 function formatFileMeta(file: FileRecord) {

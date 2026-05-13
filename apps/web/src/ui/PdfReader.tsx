@@ -126,6 +126,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const [editingNote, setEditingNote] = useState("");
   const [editingColor, setEditingColor] = useState(ANNOTATION_COLORS[0]);
   const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
+  const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchStatus, setSearchStatus] = useState<"idle" | "searching" | "done" | "failed">("idle");
@@ -158,6 +159,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       setZoomMode("custom");
       setScrollOffset(0);
       pendingScrollOffsetRef.current = null;
+      setSearchOpen(false);
       setSearchQuery("");
       setSearchResults([]);
       setSearchStatus("idle");
@@ -783,7 +785,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
       if (event.key === "/" && !isTyping) {
         event.preventDefault();
-        searchInputRef.current?.focus();
+        openReaderSearch();
         return;
       }
 
@@ -847,6 +849,12 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     }
   }
 
+  function openReaderSearch(showMobilePanel = false) {
+    setSearchOpen(true);
+    if (showMobilePanel) setMobilePanel("search");
+    window.setTimeout(() => searchInputRef.current?.focus(), 0);
+  }
+
   async function jumpToOutlineItem(item: OutlineItem) {
     if (!pdf || !item.dest) return;
 
@@ -877,8 +885,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     if (!query) return true;
     return [annotation.text, annotation.note, String(annotation.page), annotation.type].some((value) => value?.toLowerCase().includes(query));
   });
-  const annotationCards = filteredAnnotationList.length
-    ? filteredAnnotationList.map((annotation) => ({
+  const annotationCards = filteredAnnotationList.map((annotation) => ({
       id: annotation.id,
       page: annotation.page,
       type: annotation.type === "highlight" ? "高亮" : "批注",
@@ -887,12 +894,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       time: new Date(annotation.updatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
       color: annotation.color,
       annotation
-    }))
-    : [
-      { id: "sample-1", page: 3, type: "高亮", text: "这是一段被高亮的重要文字，用于强调核心概念...", note: "这里是研究的核心假设", time: "10:24", color: "#fff3bf" },
-      { id: "sample-2", page: 8, type: "批注", text: "批注位置的原文内容", note: "需要进一步查阅相关文献", time: "11:15", color: "#dbeafe" },
-      { id: "sample-3", page: 12, type: "高亮", text: "另一段高亮文字，标记了关键结论", note: null, time: "14:30", color: "#fff3bf" }
-    ];
+    }));
 
   useEffect(() => {
     setEditingNote(selectedAnnotation?.note ?? "");
@@ -947,7 +949,16 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
               <Button variant="ghost" className="reader-icon-button" onClick={() => changeScale(0.15)} disabled={scale >= 2.5} aria-label="放大"><ZoomIn size={17} /></Button>
             </div>
             <span className="reader-divider" />
-            <Button variant="ghost" className="reader-icon-button" type="button" aria-label="搜索"><Search size={18} /></Button>
+            <Button
+              variant="ghost"
+              className="reader-icon-button"
+              type="button"
+              aria-label="搜索"
+              aria-expanded={searchOpen}
+              onClick={() => openReaderSearch()}
+            >
+              <Search size={18} />
+            </Button>
             <Button variant="ghost" className="reader-icon-button" type="button" onClick={() => void handleCreateHighlight()} aria-label="高亮"><PenLine size={18} /></Button>
             <Button variant="ghost" className="reader-icon-button" type="button" aria-label="批注"><MessageSquare size={18} /></Button>
             <Button variant="ghost" className="reader-icon-button" type="button" aria-label="调色板"><Palette size={18} /></Button>
@@ -962,7 +973,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       {textLayerWarning ? <p className="helper-text">{textLayerWarning}</p> : null}
       {pdf ? (
         <form
-          className={mobilePanel === "search" ? "search-bar mobile-open" : "search-bar"}
+          className={`search-bar${searchOpen ? " open" : ""}${mobilePanel === "search" ? " mobile-open" : ""}`}
           onSubmit={(event) => {
             event.preventDefault();
             void searchDocument();
@@ -978,7 +989,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           <Button disabled={searchStatus === "searching"}>{searchStatus === "searching" ? "搜索中" : "搜索"}</Button>
         </form>
       ) : null}
-      {searchStatus === "done" ? (
+      {searchOpen && searchStatus === "done" ? (
         <div className="search-results">
           <p>{searchResults.length ? `${searchResults.length} 页匹配` : "未找到匹配文本"}</p>
           {searchResults.slice(0, 8).map((result) => (
@@ -1120,8 +1131,9 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
         ) : null}
 
         <div className="note-list">
+          {annotationCards.length === 0 ? <p className="helper-text">当前筛选条件下没有标注。</p> : null}
           {annotationCards.map((item) => (
-            <article className={selectedAnnotationId === item.id ? "note-card selected" : "note-card"} key={item.id} onClick={() => "annotation" in item && item.annotation ? jumpToAnnotation(item.annotation) : undefined}>
+            <article className={selectedAnnotationId === item.id ? "note-card selected" : "note-card"} key={item.id} onClick={() => jumpToAnnotation(item.annotation)}>
               <header><span>第 {item.page} 页 · {item.type}</span><div><Edit2 size={14} /><Trash2 size={14} /></div></header>
               <mark style={{ backgroundColor: item.color }}>{item.text}</mark>
               {item.note ? <p>备注：{item.note}</p> : null}
@@ -1135,8 +1147,11 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
         <div className="mobile-reader-actions" aria-label="Reader actions">
           <Button variant="ghost" onClick={() => setMobilePanel((current) => (current === "nav" ? null : "nav"))}>目录</Button>
           <Button variant="ghost" onClick={() => {
-            setMobilePanel((current) => (current === "search" ? null : "search"));
-            window.setTimeout(() => searchInputRef.current?.focus(), 0);
+            if (mobilePanel === "search") {
+              setMobilePanel(null);
+              return;
+            }
+            openReaderSearch(true);
           }}>搜索</Button>
           <Button variant="ghost" onClick={() => setMobilePanel(null)}>{pageNumber} / {pdf.numPages}</Button>
           <Button variant="ghost" onClick={() => setMobilePanel((current) => (current === "annotations" ? null : "annotations"))}>标注</Button>

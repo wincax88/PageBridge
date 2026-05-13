@@ -1037,6 +1037,10 @@ kbd {
   padding: 1rem clamp(1rem, 1.6vw, 1.25rem);
 }
 
+.search-bar.open {
+  display: flex;
+}
+
 .reader-active > .error,
 .reader-active > .helper-text,
 .reader-active > p:not(.eyebrow) {
@@ -2468,6 +2472,11 @@ button.danger {
 
   .mobile-annotation-card small {
     color: #16a34a;
+  }
+
+  .mobile-empty-text {
+    color: #64748b;
+    margin: 0;
   }
 
   .file-list {
