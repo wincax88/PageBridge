@@ -5,6 +5,7 @@ import { compare, hash } from "bcryptjs";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
+import { getJwtSecret } from "./jwt-secrets";
 
 interface RefreshPayload {
   sub: string;
@@ -52,7 +53,7 @@ export class AuthService {
     if (!refreshToken) throw new UnauthorizedException("Invalid refresh token");
     try {
       const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
-        secret: this.config.get<string>("JWT_REFRESH_SECRET") ?? "dev-refresh-secret"
+        secret: getJwtSecret(this.config, "JWT_REFRESH_SECRET", "dev-refresh-secret")
       });
 
       const stored = await this.prisma.refreshToken.findUnique({ where: { id: payload.jti }, include: { user: true } });
@@ -70,7 +71,7 @@ export class AuthService {
     if (!refreshToken) return { ok: true };
     try {
       const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
-        secret: this.config.get<string>("JWT_REFRESH_SECRET") ?? "dev-refresh-secret"
+        secret: getJwtSecret(this.config, "JWT_REFRESH_SECRET", "dev-refresh-secret")
       });
       await this.prisma.refreshToken.updateMany({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
     } catch {
@@ -86,7 +87,7 @@ export class AuthService {
     const refreshToken = this.jwt.sign(
       { ...payload, jti: refreshTokenId },
       {
-        secret: this.config.get<string>("JWT_REFRESH_SECRET") ?? "dev-refresh-secret",
+        secret: getJwtSecret(this.config, "JWT_REFRESH_SECRET", "dev-refresh-secret"),
         expiresIn: "30d"
       }
     );
@@ -103,7 +104,7 @@ export class AuthService {
     return {
       user: { id: userId, email },
       accessToken: this.jwt.sign(payload, {
-        secret: this.config.get<string>("JWT_ACCESS_SECRET") ?? "dev-access-secret",
+        secret: getJwtSecret(this.config, "JWT_ACCESS_SECRET", "dev-access-secret"),
         expiresIn: "15m"
       }),
       refreshToken

@@ -585,23 +585,26 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
     setAnnotationStatus("saving");
     let replayedCurrentFile = false;
+    const annotationIdMap = new Map<string, string>();
     try {
       for (const change of pendingAnnotations) {
         if (change.operation === "create") {
           const payload = change.payload as (PendingNotePayload & { type?: "text_note" }) | (PendingHighlightPayload & { type: "highlight" });
+          let created: AnnotationRecord;
           if (payload.type === "highlight") {
-            await createHighlightAnnotation(token, payload.fileId, payload.input as PendingHighlightPayload["input"]);
+            created = await createHighlightAnnotation(token, payload.fileId, payload.input as PendingHighlightPayload["input"]);
           } else {
-            await createTextNoteAnnotation(token, payload.fileId, payload.input as PendingNotePayload["input"]);
+            created = await createTextNoteAnnotation(token, payload.fileId, payload.input as PendingNotePayload["input"]);
           }
+          annotationIdMap.set(change.entityId, created.id);
           if (payload.fileId === file?.id) replayedCurrentFile = true;
         } else if (change.operation === "update") {
           const payload = change.payload as PendingAnnotationUpdatePayload;
-          await updateAnnotation(token, payload.fileId, payload.annotationId, payload.input);
+          await updateAnnotation(token, payload.fileId, annotationIdMap.get(payload.annotationId) ?? payload.annotationId, payload.input);
           if (payload.fileId === file?.id) replayedCurrentFile = true;
         } else if (change.operation === "delete") {
           const payload = change.payload as PendingAnnotationDeletePayload;
-          await deleteAnnotation(token, payload.fileId, payload.annotationId);
+          await deleteAnnotation(token, payload.fileId, annotationIdMap.get(payload.annotationId) ?? payload.annotationId);
           if (payload.fileId === file?.id) replayedCurrentFile = true;
         }
         if (change.id !== undefined) await offlineDb.pendingChanges.delete(change.id);

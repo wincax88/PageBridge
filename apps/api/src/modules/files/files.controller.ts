@@ -13,10 +13,6 @@ class CreateFileDto {
   sizeBytes!: number;
 
   @IsOptional()
-  @IsString()
-  storageKey?: string;
-
-  @IsOptional()
   @IsInt()
   pageCount?: number;
 }

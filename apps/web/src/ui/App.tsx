@@ -46,7 +46,7 @@ export function App() {
   const navigate = useNavigate();
   const syncCursorRef = useRef(new Date().toISOString());
   const selectedFileRef = useRef<FileRecord | null>(null);
-  const { accessToken, refreshToken, userEmail, setSession, clearSession } = useAuthStore();
+  const { accessToken, userEmail, setSession, clearSession } = useAuthStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
@@ -79,13 +79,13 @@ export function App() {
   const authMutation = useMutation({
     mutationFn: async (mode: "login" | "register") => (mode === "login" ? login(email, password) : register(email, password)),
     onSuccess: (session) => {
-      setSession(session.accessToken, session.refreshToken, session.user.email);
+      setSession(session.accessToken, session.user.email);
       navigate("/library", { replace: true });
     }
   });
 
   const logoutMutation = useMutation({
-    mutationFn: () => (refreshToken ? logout(refreshToken) : Promise.resolve({ ok: true })),
+    mutationFn: () => logout(),
     onSettled: () => {
       setSelectedFile(null);
       queryClient.clear();

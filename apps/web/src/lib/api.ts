@@ -13,7 +13,6 @@ export class ApiError extends Error {
 export interface AuthResponse {
   user: { id: string; email: string };
   accessToken: string;
-  refreshToken?: string;
 }
 
 export interface FileRecord {
@@ -126,11 +125,9 @@ async function refreshAccessToken() {
 }
 
 async function performRefreshAccessToken() {
-  const refreshToken = useAuthStore.getState().refreshToken;
-
   const response = await fetchApi("/auth/refresh", {
     method: "POST",
-    body: JSON.stringify(refreshToken ? { refreshToken } : {})
+    body: JSON.stringify({})
   }, undefined, true);
 
   if (!response.ok) {
@@ -139,7 +136,7 @@ async function performRefreshAccessToken() {
   }
 
   const session = (await response.json()) as AuthResponse;
-  useAuthStore.getState().setSession(session.accessToken, session.refreshToken, session.user.email);
+  useAuthStore.getState().setSession(session.accessToken, session.user.email);
   return session;
 }
 
@@ -157,10 +154,10 @@ export function register(email: string, password: string) {
   });
 }
 
-export function logout(refreshToken?: string | null) {
+export function logout() {
   return apiRequest<{ ok: boolean }>("/auth/logout", {
     method: "POST",
-    body: JSON.stringify(refreshToken ? { refreshToken } : {})
+    body: JSON.stringify({})
   });
 }
 

@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req, Res } from "@nestjs/common";
-import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
+import { IsEmail, IsString, MinLength } from "class-validator";
 import type { Request, Response } from "express";
 import { AuthService } from "./auth.service";
 
@@ -12,12 +12,6 @@ class AuthDto {
   password!: string;
 }
 
-class RefreshTokenDto {
-  @IsOptional()
-  @IsString()
-  refreshToken?: string;
-}
-
 const refreshCookieName = "pagebridge_refresh";
 
 @Controller("auth")
@@ -28,27 +22,27 @@ export class AuthController {
   async register(@Body() body: AuthDto, @Res({ passthrough: true }) response: Response) {
     const session = await this.auth.register(body.email, body.password);
     this.setRefreshCookie(response, session.refreshToken);
-    return session;
+    return this.publicSession(session);
   }
 
   @Post("login")
   async login(@Body() body: AuthDto, @Res({ passthrough: true }) response: Response) {
     const session = await this.auth.login(body.email, body.password);
     this.setRefreshCookie(response, session.refreshToken);
-    return session;
+    return this.publicSession(session);
   }
 
   @Post("refresh")
-  async refresh(@Body() body: RefreshTokenDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
-    const session = await this.auth.refresh(body.refreshToken ?? this.getRefreshCookie(request));
+  async refresh(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    const session = await this.auth.refresh(this.getRefreshCookie(request));
     this.setRefreshCookie(response, session.refreshToken);
-    return session;
+    return this.publicSession(session);
   }
 
   @Post("logout")
-  logout(@Body() body: RefreshTokenDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
+  logout(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
     response.clearCookie(refreshCookieName, this.cookieOptions());
-    return this.auth.logout(body.refreshToken ?? this.getRefreshCookie(request));
+    return this.auth.logout(this.getRefreshCookie(request));
   }
 
   private setRefreshCookie(response: Response, refreshToken: string) {
@@ -56,6 +50,13 @@ export class AuthController {
       ...this.cookieOptions(),
       maxAge: 30 * 24 * 60 * 60 * 1000
     });
+  }
+
+  private publicSession(session: { user: { id: string; email: string }; accessToken: string }) {
+    return {
+      user: session.user,
+      accessToken: session.accessToken
+    };
   }
 
   private cookieOptions() {

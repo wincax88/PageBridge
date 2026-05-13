@@ -7,7 +7,6 @@ import { StorageService } from "../storage/storage.service";
 interface CreateFileInput {
   name: string;
   sizeBytes: number;
-  storageKey?: string;
   pageCount?: number;
 }
 
@@ -82,7 +81,7 @@ export class FilesService {
         name,
         sizeBytes: input.sizeBytes,
         pageCount: input.pageCount,
-        storageKey: input.storageKey ?? `users/${userId}/pending/${randomUUID()}.pdf`
+        storageKey: `users/${userId}/pending/${randomUUID()}.pdf`
       }
     });
     await this.recordChange(userId, file.id, "create", file.id, { name: file.name });
