@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { deleteFile, getStorageUsage, getSyncState, listFiles, listSyncChanges, login, logout, register, renameFile, uploadPdf, type FileRecord } from "../lib/api";
+import { deleteFile, emptyTrash, getStorageUsage, getSyncState, listDeletedFiles, listFiles, listSyncChanges, login, logout, permanentlyDeleteFile, register, renameFile, restoreFile, uploadPdf, type DeletedFileRecord, type FileRecord } from "../lib/api";
 import { offlineDb } from "../lib/offline-db";
 import { useAuthStore } from "../store/auth-store";
 
@@ -47,8 +47,8 @@ export function App() {
   const syncCursorRef = useRef(new Date().toISOString());
   const selectedFileRef = useRef<FileRecord | null>(null);
   const { accessToken, refreshToken, userEmail, setSession, clearSession } = useAuthStore();
-  const [email, setEmail] = useState("wincax@hotmail.com");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
   const [fileSyncStatus, setFileSyncStatus] = useState<"idle" | "queued" | "syncing" | "failed">("idle");
@@ -480,7 +480,7 @@ export function App() {
   }
 
   if (location.pathname === "/trash") {
-    return <TrashPage onBack={() => navigate("/library")} />;
+    return <TrashPage token={accessToken} onBack={() => navigate("/library")} />;
   }
 
   return (
@@ -941,12 +941,32 @@ function MobileAnnotationCard({ title, highlight, note, synced }: { title: strin
   );
 }
 
-function TrashPage({ onBack }: { onBack: () => void }) {
-  const deletedFiles = [
-    { name: "旧版项目文档.pdf", meta: "32 页 · 2.1MB · 8 条标注", deletedAt: "删除于 2 天前" },
-    { name: "过期的学习资料.pdf", meta: "78 页 · 5.6MB · 15 条标注", deletedAt: "删除于 3 天前" },
-    { name: "临时阅读文件.pdf", meta: "12 页 · 1.2MB · 3 条标注", deletedAt: "删除于 4 天前" }
-  ];
+function TrashPage({ token, onBack }: { token: string; onBack: () => void }) {
+  const queryClient = useQueryClient();
+  const trashQuery = useQuery({ queryKey: ["trash", token], queryFn: () => listDeletedFiles(token) });
+  const restoreMutation = useMutation({
+    mutationFn: (fileId: string) => restoreFile(token, fileId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["trash", token] });
+      queryClient.invalidateQueries({ queryKey: ["files", token] });
+      queryClient.invalidateQueries({ queryKey: ["storage-usage", token] });
+    }
+  });
+  const permanentDeleteMutation = useMutation({
+    mutationFn: (fileId: string) => permanentlyDeleteFile(token, fileId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["trash", token] });
+      queryClient.invalidateQueries({ queryKey: ["storage-usage", token] });
+    }
+  });
+  const emptyTrashMutation = useMutation({
+    mutationFn: () => emptyTrash(token),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["trash", token] });
+      queryClient.invalidateQueries({ queryKey: ["storage-usage", token] });
+    }
+  });
+  const deletedFiles = trashQuery.data ?? [];
 
   return (
     <main className="trash-shell">
@@ -961,20 +981,23 @@ function TrashPage({ onBack }: { onBack: () => void }) {
 
         <div className="trash-table">
           <div className="trash-table-head">
-            <label><input type="checkbox" />共 3 个文件</label>
-            <Button className="danger-outline-button" variant="outline">清空回收站</Button>
+            <label><input type="checkbox" />共 {deletedFiles.length} 个文件</label>
+            <Button className="danger-outline-button" variant="outline" onClick={() => emptyTrashMutation.mutate()} disabled={deletedFiles.length === 0 || emptyTrashMutation.isPending}>清空回收站</Button>
           </div>
+          {trashQuery.isLoading ? <p className="trash-state">正在加载回收站...</p> : null}
+          {trashQuery.error ? <p className="trash-state error">加载回收站失败</p> : null}
+          {!trashQuery.isLoading && deletedFiles.length === 0 ? <p className="trash-state">回收站为空</p> : null}
           {deletedFiles.map((file) => (
-            <article className="trash-row" key={file.name}>
+            <article className="trash-row" key={file.id}>
               <input type="checkbox" aria-label={`选择 ${file.name}`} />
               <div className="trash-file-icon"><FileText size={28} /></div>
               <div className="trash-file-info">
                 <strong>{file.name}</strong>
-                <span>{file.meta} <i>·</i> <Clock size={14} /> {file.deletedAt}</span>
+                <span>{formatFileMeta(file)} <i>·</i> <Clock size={14} /> {formatDeletedAt(file)}</span>
               </div>
               <div className="trash-actions">
-                <Button variant="outline">恢复</Button>
-                <Button className="danger-outline-button" variant="outline">永久删除</Button>
+                <Button variant="outline" onClick={() => restoreMutation.mutate(file.id)} disabled={restoreMutation.isPending}>恢复</Button>
+                <Button className="danger-outline-button" variant="outline" onClick={() => permanentDeleteMutation.mutate(file.id)} disabled={permanentDeleteMutation.isPending}>永久删除</Button>
               </div>
             </article>
           ))}
@@ -989,17 +1012,12 @@ function TrashPage({ onBack }: { onBack: () => void }) {
   );
 }
 
-function SettingsRow({ label, detail, active = false }: { label: string; detail: string; active?: boolean }) {
-  return (
-    <article className="settings-row">
-      <span aria-hidden="true" className={active ? "settings-row-icon active" : "settings-row-icon"} />
-      <div>
-        <strong>{label}</strong>
-        <small>{detail}</small>
-      </div>
-      <span className="settings-row-arrow" aria-hidden="true">&gt;</span>
-    </article>
-  );
+function formatDeletedAt(file: DeletedFileRecord) {
+  const deletedAt = new Date(file.deletedAt).getTime();
+  if (!Number.isFinite(deletedAt)) return "删除时间未知";
+  const days = Math.max(0, Math.floor((Date.now() - deletedAt) / (24 * 60 * 60 * 1000)));
+  if (days === 0) return "今天删除";
+  return `删除于 ${days} 天前`;
 }
 
 function formatFileMeta(file: FileRecord) {

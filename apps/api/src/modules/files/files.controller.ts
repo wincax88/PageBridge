@@ -68,6 +68,11 @@ export class FilesController {
     return this.files.usage(user.id);
   }
 
+  @Get("trash")
+  trash(@CurrentUser() user: CurrentUser) {
+    return this.files.listDeleted(user.id);
+  }
+
   @Post()
   create(@CurrentUser() user: CurrentUser, @Body() body: CreateFileDto) {
     return this.files.create(user.id, body);
@@ -107,6 +112,21 @@ export class FilesController {
   @Patch(":fileId/page-count")
   updatePageCount(@CurrentUser() user: CurrentUser, @Param("fileId") fileId: string, @Body() body: UpdatePageCountDto) {
     return this.files.updatePageCount(user.id, fileId, body.pageCount);
+  }
+
+  @Patch("trash/:fileId/restore")
+  restore(@CurrentUser() user: CurrentUser, @Param("fileId") fileId: string) {
+    return this.files.restore(user.id, fileId);
+  }
+
+  @Delete("trash")
+  emptyTrash(@CurrentUser() user: CurrentUser) {
+    return this.files.emptyTrash(user.id);
+  }
+
+  @Delete("trash/:fileId")
+  permanentlyDelete(@CurrentUser() user: CurrentUser, @Param("fileId") fileId: string) {
+    return this.files.permanentlyDelete(user.id, fileId);
   }
 
   @Delete(":fileId")

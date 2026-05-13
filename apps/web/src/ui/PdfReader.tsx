@@ -121,7 +121,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "failed">("idle");
   const [annotationStatus, setAnnotationStatus] = useState<"idle" | "saving" | "queued" | "failed" | "conflict">("idle");
   const [annotations, setAnnotations] = useState<AnnotationRecord[]>([]);
-  const [deletedAnnotation, setDeletedAnnotation] = useState<DeletedAnnotationSnapshot | null>(null);
+  const [, setDeletedAnnotation] = useState<DeletedAnnotationSnapshot | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState("");
   const [editingColor, setEditingColor] = useState(ANNOTATION_COLORS[0]);
@@ -693,56 +693,6 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     }
   }
 
-  async function handleUndoDelete() {
-    if (!file || !deletedAnnotation || Date.now() > deletedAnnotation.expiresAt) {
-      setDeletedAnnotation(null);
-      return;
-    }
-
-    const annotation = deletedAnnotation.annotation;
-    setDeletedAnnotation(null);
-
-    if (annotation.id.startsWith("offline-")) {
-      await offlineDb.pendingChanges.where("entityId").equals(annotation.id).delete();
-      updateAnnotations((current) => [...current, annotation]);
-      setSelectedAnnotationId(annotation.id);
-      setAnnotationStatus("queued");
-      return;
-    }
-
-    setAnnotationStatus("saving");
-    try {
-      const restored = annotation.type === "highlight" && annotation.quadPoints
-        ? await createHighlightAnnotation(token, file.id, {
-          page: annotation.page,
-          text: annotation.text ?? "",
-          note: annotation.note,
-          color: annotation.color,
-          quadPoints: annotation.quadPoints,
-          pageWidth: annotation.pageWidth ?? pageSize.width / scale,
-          pageHeight: annotation.pageHeight ?? pageSize.height / scale
-        })
-        : annotation.rect
-          ? await createTextNoteAnnotation(token, file.id, {
-            page: annotation.page,
-            note: annotation.note ?? "Restored note",
-            color: annotation.color,
-            rect: annotation.rect,
-            pageWidth: annotation.pageWidth ?? pageSize.width / scale,
-            pageHeight: annotation.pageHeight ?? pageSize.height / scale
-          })
-          : null;
-
-      if (restored) {
-        updateAnnotations((current) => [...current, restored]);
-        setSelectedAnnotationId(restored.id);
-      }
-      setAnnotationStatus("idle");
-    } catch (err) {
-      await handleAnnotationError(err, "Failed to restore annotation");
-    }
-  }
-
   async function handleSaveSelectedAnnotation() {
     if (!file || !selectedAnnotation) return;
 
@@ -822,11 +772,6 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       : Math.min(availableWidth / viewport.width, availableHeight / viewport.height);
 
     setScale(Number(Math.min(2.5, Math.max(0.75, nextScale)).toFixed(2)));
-  }
-
-  function setFitZoom(mode: ZoomMode) {
-    setZoomMode(mode);
-    void applyFitZoom(mode);
   }
 
   useEffect(() => {
@@ -932,8 +877,6 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     if (!query) return true;
     return [annotation.text, annotation.note, String(annotation.page), annotation.type].some((value) => value?.toLowerCase().includes(query));
   });
-  const highlightCount = annotations.filter((annotation) => annotation.type === "highlight").length;
-  const noteCount = annotations.filter((annotation) => annotation.type === "text_note").length;
   const annotationCards = filteredAnnotationList.length
     ? filteredAnnotationList.map((annotation) => ({
       id: annotation.id,
@@ -1282,14 +1225,6 @@ function formatReaderStatus(status: "idle" | "syncing" | "synced" | "failed") {
   if (status === "synced") return "已同步";
   if (status === "failed") return "同步失败";
   return "就绪";
-}
-
-function formatAnnotationStatus(status: "idle" | "saving" | "queued" | "failed" | "conflict") {
-  if (status === "saving") return "保存中";
-  if (status === "queued") return "待同步";
-  if (status === "failed") return "同步失败";
-  if (status === "conflict") return "同步冲突";
-  return "已同步";
 }
 
 function AnnotationEditor({

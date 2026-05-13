@@ -24,6 +24,10 @@ export interface FileRecord {
   updatedAt: string;
 }
 
+export interface DeletedFileRecord extends FileRecord {
+  deletedAt: string;
+}
+
 export interface StorageUsageRecord {
   usedBytes: string;
   quotaBytes: string;
@@ -168,6 +172,10 @@ export function getStorageUsage(token: string) {
   return apiRequest<StorageUsageRecord>("/files/usage", {}, token);
 }
 
+export function listDeletedFiles(token: string) {
+  return apiRequest<DeletedFileRecord[]>("/files/trash", {}, token);
+}
+
 export function listSyncChanges(token: string, since: string) {
   return apiRequest<SyncChangeRecord[]>(`/sync/changes?since=${encodeURIComponent(since)}`, {}, token);
 }
@@ -248,6 +256,36 @@ export function updateFilePageCount(token: string, fileId: string, pageCount: nu
 export function deleteFile(token: string, fileId: string) {
   return apiRequest<FileRecord>(
     `/files/${fileId}`,
+    {
+      method: "DELETE"
+    },
+    token
+  );
+}
+
+export function restoreFile(token: string, fileId: string) {
+  return apiRequest<FileRecord>(
+    `/files/trash/${fileId}/restore`,
+    {
+      method: "PATCH"
+    },
+    token
+  );
+}
+
+export function permanentlyDeleteFile(token: string, fileId: string) {
+  return apiRequest<{ ok: boolean }>(
+    `/files/trash/${fileId}`,
+    {
+      method: "DELETE"
+    },
+    token
+  );
+}
+
+export function emptyTrash(token: string) {
+  return apiRequest<{ ok: boolean; deletedCount: number }>(
+    "/files/trash",
     {
       method: "DELETE"
     },

@@ -1820,6 +1820,12 @@ button.danger {
   border-bottom: 0;
 }
 
+.trash-state {
+  color: #64748b;
+  margin: 0;
+  padding: 1rem;
+}
+
 .trash-table input[type="checkbox"] {
   appearance: none;
   border: 1px solid #9ca3af;
@@ -2889,59 +2895,11 @@ button.danger {
   }
 
   .page-layer {
-    background: #fff;
-    border-radius: 0.25rem;
-    box-shadow: 0 1px 5px rgb(15 23 42 / 14%);
-    height: 310px !important;
-    max-width: none;
-    min-height: 310px;
-    width: 100% !important;
-  }
-
-  .page-layer canvas,
-  .text-layer,
-  .annotation-layer {
-    display: none;
-  }
-
-  .page-layer::before {
-    color: #475569;
-    content: "PDF 页面 8";
-    left: 50%;
-    position: absolute;
-    top: 0.25rem;
-    transform: translateX(-50%);
-  }
-
-  .page-layer::after {
-    background: linear-gradient(#e8e8ee 0 0) center 32px / 72px 12px no-repeat,
-      linear-gradient(#e8e8ee 0 0) center 52px / 58px 12px no-repeat,
-      linear-gradient(#fff17a 0 0) center 72px / 48px 12px no-repeat,
-      linear-gradient(#e8e8ee 0 0) center 92px / 72px 12px no-repeat,
-      linear-gradient(#e8e8ee 0 0) center 112px / 54px 12px no-repeat;
-    content: "";
-    inset: 40px 0 auto;
-    height: 130px;
-    position: absolute;
+    max-width: 100%;
   }
 
   .adjacent-page {
-    background: #fff;
-    border-radius: 0.25rem;
-    box-shadow: 0 1px 5px rgb(15 23 42 / 14%);
-    display: grid;
-    min-height: 310px;
-    place-items: center;
     width: 100%;
-  }
-
-  .adjacent-page canvas {
-    display: none;
-  }
-
-  .adjacent-page span {
-    color: #475569;
-    font-size: 1rem;
   }
 
   .mobile-reader-actions {

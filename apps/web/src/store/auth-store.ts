@@ -10,11 +10,11 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   accessToken: localStorage.getItem("pagebridge.accessToken"),
-  refreshToken: null,
+  refreshToken: localStorage.getItem("pagebridge.refreshToken"),
   userEmail: localStorage.getItem("pagebridge.userEmail"),
   setSession: (accessToken, refreshToken, userEmail) => {
     localStorage.setItem("pagebridge.accessToken", accessToken);
-    localStorage.removeItem("pagebridge.refreshToken");
+    if (refreshToken) localStorage.setItem("pagebridge.refreshToken", refreshToken);
     localStorage.setItem("pagebridge.userEmail", userEmail);
     set({ accessToken, refreshToken: refreshToken ?? null, userEmail });
   },

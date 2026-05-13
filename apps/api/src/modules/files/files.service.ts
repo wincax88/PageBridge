@@ -21,7 +21,7 @@ interface CompleteUploadInput {
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 const FREE_USER_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024;
 const FREE_USER_FILE_COUNT_QUOTA = 500;
-const SOFT_DELETE_RETENTION_DAYS = 7;
+const SOFT_DELETE_RETENTION_DAYS = 30;
 
 @Injectable()
 export class FilesService {
@@ -37,6 +37,16 @@ export class FilesService {
       where: { userId, deletedAt: null },
       orderBy: { updatedAt: "desc" },
       select: { id: true, name: true, sizeBytes: true, pageCount: true, updatedAt: true }
+    });
+    return files.map((file) => ({ ...file, sizeBytes: file.sizeBytes.toString() }));
+  }
+
+  async listDeleted(userId: string) {
+    await this.purgeExpiredDeletedFiles(userId);
+    const files = await this.prisma.file.findMany({
+      where: { userId, deletedAt: { not: null } },
+      orderBy: { deletedAt: "desc" },
+      select: { id: true, name: true, sizeBytes: true, pageCount: true, updatedAt: true, deletedAt: true }
     });
     return files.map((file) => ({ ...file, sizeBytes: file.sizeBytes.toString() }));
   }
@@ -180,6 +190,34 @@ export class FilesService {
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
+  async restore(userId: string, fileId: string) {
+    const deletedFile = await this.ensureDeletedFile(userId, fileId);
+    await this.ensureFileCountQuota(userId);
+    await this.ensureStorageQuota(userId, Number(deletedFile.sizeBytes));
+    const file = await this.prisma.file.update({ where: { id: fileId }, data: { deletedAt: null } });
+    await this.recordChange(userId, fileId, "update", fileId, { deletedAt: null });
+    return { ...file, sizeBytes: file.sizeBytes.toString() };
+  }
+
+  async permanentlyDelete(userId: string, fileId: string) {
+    const file = await this.ensureDeletedFile(userId, fileId);
+    await this.deleteStoredFile(file.id, file.storageKey);
+    return { ok: true };
+  }
+
+  async emptyTrash(userId: string) {
+    const deletedFiles = await this.prisma.file.findMany({
+      where: { userId, deletedAt: { not: null } },
+      select: { id: true, storageKey: true }
+    });
+
+    for (const file of deletedFiles) {
+      await this.deleteStoredFile(file.id, file.storageKey);
+    }
+
+    return { ok: true, deletedCount: deletedFiles.length };
+  }
+
   private async recordChange(userId: string, fileId: string, operation: "create" | "update" | "delete", entityId: string, payload: unknown) {
     await this.prisma.syncChange.create({
       data: {
@@ -197,6 +235,12 @@ export class FilesService {
   private async ensureFile(userId: string, fileId: string) {
     const file = await this.prisma.file.findFirst({ where: { id: fileId, userId, deletedAt: null } });
     if (!file) throw new NotFoundException("File not found");
+    return file;
+  }
+
+  private async ensureDeletedFile(userId: string, fileId: string) {
+    const file = await this.prisma.file.findFirst({ where: { id: fileId, userId, deletedAt: { not: null } } });
+    if (!file) throw new NotFoundException("Deleted file not found");
     return file;
   }
 
@@ -251,12 +295,16 @@ export class FilesService {
     if (expiredFiles.length === 0) return;
 
     for (const file of expiredFiles) {
-      try {
-        await this.storage.deleteObject(file.storageKey);
-      } catch {
-        // The database is the source of truth for retention; missing objects should not block cleanup.
-      }
-      await this.prisma.file.delete({ where: { id: file.id } });
+      await this.deleteStoredFile(file.id, file.storageKey);
     }
+  }
+
+  private async deleteStoredFile(fileId: string, storageKey: string) {
+    try {
+      await this.storage.deleteObject(storageKey);
+    } catch {
+      // The database is the source of truth for retention; missing objects should not block cleanup.
+    }
+    await this.prisma.file.delete({ where: { id: fileId } });
   }
 }
