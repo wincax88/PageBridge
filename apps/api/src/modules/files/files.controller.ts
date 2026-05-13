@@ -1,21 +1,9 @@
 import { Body, Controller, Delete, Get, Header, Param, Patch, Post, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { IsInt, IsNumber, IsOptional, IsString } from "class-validator";
+import { IsInt, IsNumber, IsString } from "class-validator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { FilesService } from "./files.service";
-
-class CreateFileDto {
-  @IsString()
-  name!: string;
-
-  @IsNumber()
-  sizeBytes!: number;
-
-  @IsOptional()
-  @IsInt()
-  pageCount?: number;
-}
 
 class RenameFileDto {
   @IsString()
@@ -67,11 +55,6 @@ export class FilesController {
   @Get("trash")
   trash(@CurrentUser() user: CurrentUser) {
     return this.files.listDeleted(user.id);
-  }
-
-  @Post()
-  create(@CurrentUser() user: CurrentUser, @Body() body: CreateFileDto) {
-    return this.files.create(user.id, body);
   }
 
   @Post("upload")

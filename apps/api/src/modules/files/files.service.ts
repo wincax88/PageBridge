@@ -4,12 +4,6 @@ import { PrismaService } from "../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
 import { StorageService } from "../storage/storage.service";
 
-interface CreateFileInput {
-  name: string;
-  sizeBytes: number;
-  pageCount?: number;
-}
-
 interface CompleteUploadInput {
   fileId: string;
   name: string;
@@ -65,27 +59,6 @@ export class FilesService {
       fileCount: aggregate._count.id,
       fileCountQuota: FREE_USER_FILE_COUNT_QUOTA
     };
-  }
-
-  async create(userId: string, input: CreateFileInput) {
-    await this.purgeExpiredDeletedFiles(userId);
-    const name = this.normalizeFileName(input.name);
-    if (!Number.isFinite(input.sizeBytes) || input.sizeBytes < 0) throw new BadRequestException("File size is invalid");
-    if (input.sizeBytes > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
-    await this.ensureFileCountQuota(userId);
-    await this.ensureStorageQuota(userId, input.sizeBytes);
-
-    const file = await this.prisma.file.create({
-      data: {
-        userId,
-        name,
-        sizeBytes: input.sizeBytes,
-        pageCount: input.pageCount,
-        storageKey: `users/${userId}/pending/${randomUUID()}.pdf`
-      }
-    });
-    await this.recordChange(userId, file.id, "create", file.id, { name: file.name });
-    return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
   async upload(userId: string, file: Express.Multer.File) {

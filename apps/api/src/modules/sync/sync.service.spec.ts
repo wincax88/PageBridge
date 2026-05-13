@@ -1,3 +1,4 @@
+import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { SyncService } from "./sync.service";
 
@@ -37,5 +38,14 @@ describe("SyncService.state", () => {
       latestChangeId: null,
       cursor: "1970-01-01T00:00:00.000Z"
     });
+  });
+});
+
+describe("SyncService.changes", () => {
+  it("rejects invalid cursors", () => {
+    const { service, prisma } = createService(null);
+
+    expect(() => service.changes("user-1", "not-a-date")).toThrow(BadRequestException);
+    expect(prisma.syncChange.findMany).not.toHaveBeenCalled();
   });
 });

@@ -3,6 +3,18 @@ import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
 type AnnotationType = "highlight" | "text_note";
+const MAX_ANNOTATION_TEXT_LENGTH = 20000;
+const MAX_ANNOTATION_NOTE_LENGTH = 10000;
+const MAX_QUAD_POINTS = 100;
+const MAX_COORDINATE_VALUE = 100000;
+
+interface AnnotationRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  coordinateSpace?: "pdf" | "viewport";
+}
 
 interface AnnotationInput {
   type: AnnotationType;
@@ -117,10 +129,28 @@ export class AnnotationsService {
   private validateAnnotationInput(input: Partial<AnnotationInput>, partial = false) {
     if (!partial && input.type !== "highlight" && input.type !== "text_note") throw new BadRequestException("Annotation type is invalid");
     if (input.page !== undefined && (!Number.isInteger(input.page) || input.page < 1)) throw new BadRequestException("Annotation page is invalid");
-    if (input.note !== undefined && input.note.length > 10000) throw new BadRequestException("Annotation note is too long");
+    if (input.text !== undefined && input.text.length > MAX_ANNOTATION_TEXT_LENGTH) throw new BadRequestException("Annotation text is too long");
+    if (input.note !== undefined && input.note.length > MAX_ANNOTATION_NOTE_LENGTH) throw new BadRequestException("Annotation note is too long");
     if (input.color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(input.color)) throw new BadRequestException("Annotation color is invalid");
     if (input.pageWidth !== undefined && input.pageWidth <= 0) throw new BadRequestException("Page width is invalid");
     if (input.pageHeight !== undefined && input.pageHeight <= 0) throw new BadRequestException("Page height is invalid");
+    if (input.pageRotation !== undefined && !Number.isInteger(input.pageRotation)) throw new BadRequestException("Page rotation is invalid");
+    if (input.deviceId !== undefined && input.deviceId.length > 200) throw new BadRequestException("Device id is too long");
     if (input.baseVersion !== undefined && (!Number.isInteger(input.baseVersion) || input.baseVersion < 1)) throw new BadRequestException("Annotation version is invalid");
+    if (input.rect !== undefined && !this.isValidRect(input.rect)) throw new BadRequestException("Annotation rect is invalid");
+    if (input.quadPoints !== undefined && !this.isValidQuadPoints(input.quadPoints)) throw new BadRequestException("Annotation quad points are invalid");
+  }
+
+  private isValidQuadPoints(value: unknown) {
+    return Array.isArray(value) && value.length <= MAX_QUAD_POINTS && value.every((item) => this.isValidRect(item));
+  }
+
+  private isValidRect(value: unknown): value is AnnotationRect {
+    if (!value || typeof value !== "object") return false;
+    const rect = value as Partial<AnnotationRect>;
+    const coordinates = [rect.x, rect.y, rect.width, rect.height];
+    if (!coordinates.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate) && Math.abs(coordinate) <= MAX_COORDINATE_VALUE)) return false;
+    if (rect.width === undefined || rect.height === undefined || rect.width <= 0 || rect.height <= 0) return false;
+    return rect.coordinateSpace === undefined || rect.coordinateSpace === "pdf" || rect.coordinateSpace === "viewport";
   }
 }

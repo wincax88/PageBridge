@@ -597,6 +597,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
             created = await createTextNoteAnnotation(token, payload.fileId, payload.input as PendingNotePayload["input"]);
           }
           annotationIdMap.set(change.entityId, created.id);
+          await replacePendingAnnotationId(change.entityId, created.id, change.id);
           if (payload.fileId === file?.id) replayedCurrentFile = true;
         } else if (change.operation === "update") {
           const payload = change.payload as PendingAnnotationUpdatePayload;
@@ -618,6 +619,27 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     } catch (err) {
       await handleAnnotationError(err, "Failed to sync annotation changes");
     }
+  }
+
+  async function replacePendingAnnotationId(localId: string, serverId: string, excludeChangeId?: number) {
+    if (!localId.startsWith("offline-")) return;
+
+    const pending = await offlineDb.pendingChanges
+      .where("entityType")
+      .equals("annotation")
+      .and((change) => change.entityId === localId && change.id !== excludeChangeId)
+      .toArray();
+
+    await Promise.all(pending.map((change) => {
+      if (change.id === undefined) return Promise.resolve();
+      const payload = change.payload as Partial<PendingAnnotationUpdatePayload & PendingAnnotationDeletePayload>;
+      return offlineDb.pendingChanges.update(change.id, {
+        entityId: serverId,
+        payload: { ...payload, annotationId: serverId }
+      });
+    }));
+
+    updateAnnotations((current) => current.map((annotation) => (annotation.id === localId ? { ...annotation, id: serverId } : annotation)));
   }
 
   async function handleCreateHighlight() {

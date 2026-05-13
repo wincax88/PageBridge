@@ -181,17 +181,6 @@ export function getSyncState(token: string) {
   return apiRequest<SyncStateRecord>("/sync/state", {}, token);
 }
 
-export function createFile(token: string, name: string) {
-  return apiRequest<FileRecord>(
-    "/files",
-    {
-      method: "POST",
-      body: JSON.stringify({ name, sizeBytes: 0, pageCount: null })
-    },
-    token
-  );
-}
-
 export async function uploadPdf(token: string, file: File) {
   const target = await apiRequest<UploadTargetRecord>(
     "/files/upload-target",

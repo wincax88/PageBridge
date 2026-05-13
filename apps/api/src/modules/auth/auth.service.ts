@@ -57,10 +57,12 @@ export class AuthService {
       });
 
       const stored = await this.prisma.refreshToken.findUnique({ where: { id: payload.jti }, include: { user: true } });
-      if (!stored || stored.revokedAt || stored.expiresAt <= new Date()) throw new UnauthorizedException("Invalid refresh token");
+      const now = new Date();
+      if (!stored || stored.revokedAt || stored.expiresAt <= now) throw new UnauthorizedException("Invalid refresh token");
       if (!(await compare(refreshToken, stored.tokenHash))) throw new UnauthorizedException("Invalid refresh token");
 
-      await this.prisma.refreshToken.update({ where: { id: stored.id }, data: { revokedAt: new Date() } });
+      const revoked = await this.prisma.refreshToken.updateMany({ where: { id: stored.id, revokedAt: null, expiresAt: { gt: now } }, data: { revokedAt: now } });
+      if (revoked.count !== 1) throw new UnauthorizedException("Invalid refresh token");
       return this.issueTokens(stored.user.id, stored.user.email);
     } catch {
       throw new UnauthorizedException("Invalid refresh token");

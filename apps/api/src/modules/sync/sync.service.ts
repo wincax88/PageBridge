@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
 
@@ -24,11 +24,14 @@ export class SyncService {
   ) {}
 
   changes(userId: string, since?: string, fileId?: string) {
+    const sinceDate = since ? new Date(since) : undefined;
+    if (sinceDate && Number.isNaN(sinceDate.getTime())) throw new BadRequestException("Sync cursor is invalid");
+
     return this.prisma.syncChange.findMany({
       where: {
         userId,
         fileId,
-        createdAt: since ? { gt: new Date(since) } : undefined
+        createdAt: sinceDate ? { gt: sinceDate } : undefined
       },
       orderBy: { createdAt: "asc" },
       take: 500

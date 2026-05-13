@@ -18,7 +18,6 @@ function createService() {
   const prisma = {
     refreshToken: {
       findUnique: vi.fn().mockResolvedValue(storedToken),
-      update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       create: vi.fn().mockResolvedValue({})
     },
@@ -57,13 +56,24 @@ describe("AuthService refresh/logout", () => {
 
     const session = await service.refresh("old-refresh-token");
 
-    expect(prisma.refreshToken.update).toHaveBeenCalledWith({ where: { id: "refresh-1" }, data: { revokedAt: expect.any(Date) } });
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { id: "refresh-1", revokedAt: null, expiresAt: { gt: expect.any(Date) } },
+      data: { revokedAt: expect.any(Date) }
+    });
     expect(prisma.refreshToken.create).toHaveBeenCalled();
     expect(session).toEqual({
       user: { id: "user-1", email: "reader@example.com" },
       accessToken: "new-access-token",
       refreshToken: "new-refresh-token"
     });
+  });
+
+  it("rejects refresh when another request already rotated the token", async () => {
+    const { service, prisma } = createService();
+    prisma.refreshToken.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(service.refresh("old-refresh-token")).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(prisma.refreshToken.create).not.toHaveBeenCalled();
   });
 
   it("allows logout without a token", async () => {
