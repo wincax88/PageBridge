@@ -58,6 +58,7 @@ interface PendingNotePayload {
     rect: AnnotationRect;
     pageWidth: number;
     pageHeight: number;
+    clientRequestId?: string;
   };
 }
 
@@ -73,6 +74,7 @@ interface PendingHighlightPayload {
     quadPoints: AnnotationRect[];
     pageWidth: number;
     pageHeight: number;
+    clientRequestId?: string;
   };
 }
 
@@ -494,23 +496,24 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     if (!file || !noteDraftInput || !noteDraftText.trim()) return;
 
     const input = { ...noteDraftInput, note: noteDraftText.trim() };
+    const clientRequestId = `offline-${crypto.randomUUID()}`;
     setNoteDraftInput(null);
     setNoteDraftText("");
 
     if (!navigator.onLine) {
-      await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "text_note", input);
+      await queuePendingAnnotationCreate(clientRequestId, file.id, "text_note", { ...input, clientRequestId });
       return;
     }
 
     setAnnotationStatus("saving");
     try {
-      const created = await createTextNoteAnnotation(token, file.id, input);
+      const created = await createTextNoteAnnotation(token, file.id, { ...input, clientRequestId });
       updateAnnotations((current) => [...current, created]);
       setSelectedAnnotationId(created.id);
       setAnnotationStatus("idle");
     } catch (err) {
       if (shouldQueueActionError(err)) {
-        await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "text_note", input);
+        await queuePendingAnnotationCreate(clientRequestId, file.id, "text_note", { ...input, clientRequestId });
         return;
       }
 
@@ -609,9 +612,9 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
           const payload = change.payload as (PendingNotePayload & { type?: "text_note" }) | (PendingHighlightPayload & { type: "highlight" });
           let created: AnnotationRecord;
           if (payload.type === "highlight") {
-            created = await createHighlightAnnotation(token, payload.fileId, payload.input as PendingHighlightPayload["input"]);
+            created = await createHighlightAnnotation(token, payload.fileId, { ...(payload.input as PendingHighlightPayload["input"]), clientRequestId: change.entityId });
           } else {
-            created = await createTextNoteAnnotation(token, payload.fileId, payload.input as PendingNotePayload["input"]);
+            created = await createTextNoteAnnotation(token, payload.fileId, { ...(payload.input as PendingNotePayload["input"]), clientRequestId: change.entityId });
           }
           annotationIdMap.set(change.entityId, created.id);
           await replacePendingAnnotationId(change.entityId, created.id, change.id);
@@ -683,14 +686,16 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     const quadPoints = rects.map((rect) => viewportRectToPdfRect(rect, viewportRef.current!));
     const basePageWidth = pageSize.width / scale;
     const basePageHeight = pageSize.height / scale;
+    const clientRequestId = `offline-${crypto.randomUUID()}`;
 
     if (!navigator.onLine) {
-      await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "highlight", {
+      await queuePendingAnnotationCreate(clientRequestId, file.id, "highlight", {
         page: pageNumber,
         text: selectedText,
         quadPoints,
         pageWidth: basePageWidth,
-        pageHeight: basePageHeight
+        pageHeight: basePageHeight,
+        clientRequestId
       });
       selection.removeAllRanges();
       return;
@@ -703,7 +708,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
         text: selectedText,
         quadPoints,
         pageWidth: basePageWidth,
-        pageHeight: basePageHeight
+        pageHeight: basePageHeight,
+        clientRequestId
       });
       updateAnnotations((current) => [...current, created]);
       setSelectedAnnotationId(created.id);
@@ -711,12 +717,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       selection.removeAllRanges();
     } catch (err) {
       if (shouldQueueActionError(err)) {
-        await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "highlight", {
+        await queuePendingAnnotationCreate(clientRequestId, file.id, "highlight", {
           page: pageNumber,
           text: selectedText,
           quadPoints,
           pageWidth: basePageWidth,
-          pageHeight: basePageHeight
+          pageHeight: basePageHeight,
+          clientRequestId
         });
         selection.removeAllRanges();
         return;

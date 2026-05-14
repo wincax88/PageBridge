@@ -29,6 +29,7 @@ interface AnnotationInput {
   pageRotation?: number;
   deviceId?: string;
   baseVersion?: number;
+  clientRequestId?: string;
 }
 
 @Injectable()
@@ -46,24 +47,35 @@ export class AnnotationsService {
   async create(userId: string, fileId: string, input: AnnotationInput) {
     await this.ensureFile(userId, fileId);
     this.validateAnnotationInput(input);
+    if (input.clientRequestId) {
+      const existingChange = await this.prisma.syncChange.findUnique({ where: { userId_clientRequestId: { userId, clientRequestId: input.clientRequestId } } });
+      if (existingChange) {
+        if (existingChange.entityType !== "annotation" || existingChange.operation !== "create" || existingChange.fileId !== fileId) throw new BadRequestException("Annotation request is invalid");
+        const existingAnnotation = await this.prisma.annotation.findFirst({ where: { id: existingChange.entityId, userId, fileId } });
+        if (!existingAnnotation) throw new BadRequestException("Annotation request is invalid");
+        return existingAnnotation;
+      }
+    }
+
+    const { clientRequestId: _clientRequestId, ...createInput } = input;
     const annotation = await this.prisma.annotation.create({
       data: {
         userId,
         fileId,
-        type: input.type,
-        page: input.page,
-        color: input.color,
-        text: input.text,
-        note: input.note,
-        quadPoints: input.quadPoints as never,
-        rect: input.rect as never,
-        pageWidth: input.pageWidth,
-        pageHeight: input.pageHeight,
-        pageRotation: input.pageRotation,
-        deviceId: input.deviceId
+        type: createInput.type,
+        page: createInput.page,
+        color: createInput.color,
+        text: createInput.text,
+        note: createInput.note,
+        quadPoints: createInput.quadPoints as never,
+        rect: createInput.rect as never,
+        pageWidth: createInput.pageWidth,
+        pageHeight: createInput.pageHeight,
+        pageRotation: createInput.pageRotation,
+        deviceId: createInput.deviceId
       }
     });
-    await this.recordChange(userId, fileId, "create", annotation.id, annotation.version, annotation);
+    await this.recordChange(userId, fileId, "create", annotation.id, annotation.version, annotation, input.clientRequestId);
     return annotation;
   }
 
@@ -73,7 +85,7 @@ export class AnnotationsService {
     if (input.baseVersion !== undefined && input.baseVersion !== current.version) {
       throw new ConflictException("Annotation has changed on another device");
     }
-    const { baseVersion: _baseVersion, ...updateInput } = input;
+    const { baseVersion: _baseVersion, clientRequestId: _clientRequestId, ...updateInput } = input;
     const annotation = await this.prisma.annotation.update({
       where: { id: annotationId },
       data: { ...updateInput, version: { increment: 1 } } as never
@@ -98,7 +110,8 @@ export class AnnotationsService {
     operation: "create" | "update" | "delete",
     entityId: string,
     nextVersion: number,
-    payload: unknown
+    payload: unknown,
+    clientRequestId: string = randomUUID()
   ) {
     await this.prisma.syncChange.create({
       data: {
@@ -108,7 +121,7 @@ export class AnnotationsService {
         entityId,
         operation,
         nextVersion,
-        clientRequestId: randomUUID(),
+        clientRequestId,
         payload: payload as never
       }
     });

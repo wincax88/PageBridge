@@ -54,6 +54,10 @@ class UpsertAnnotationDto {
   @IsOptional()
   @IsInt()
   baseVersion?: number;
+
+  @IsOptional()
+  @IsString()
+  clientRequestId?: string;
 }
 
 @UseGuards(JwtAuthGuard)

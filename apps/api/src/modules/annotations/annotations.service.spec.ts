@@ -20,9 +20,13 @@ function createService() {
     file: { findFirst: vi.fn().mockResolvedValue({ id: "file-1", userId: "user-1" }) },
     annotation: {
       findFirst: vi.fn().mockResolvedValue(currentAnnotation),
+      create: vi.fn().mockResolvedValue(currentAnnotation),
       update: vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...currentAnnotation, ...data, version: currentAnnotation.version + 1 }))
     },
-    syncChange: { create: vi.fn().mockResolvedValue({}) }
+    syncChange: {
+      create: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null)
+    }
   };
 
   return {
@@ -49,5 +53,28 @@ describe("AnnotationsService.update", () => {
       data: { note: "new note", version: { increment: 1 } }
     });
     expect(updated.version).toBe(4);
+  });
+});
+
+describe("AnnotationsService.create", () => {
+  it("returns the existing annotation for a repeated client request", async () => {
+    const { service, prisma } = createService();
+    prisma.syncChange.findUnique.mockResolvedValue({
+      entityType: "annotation",
+      operation: "create",
+      fileId: "file-1",
+      entityId: "annotation-1"
+    });
+
+    const annotation = await service.create("user-1", "file-1", {
+      type: "highlight",
+      page: 1,
+      text: "selected text",
+      quadPoints: [{ x: 1, y: 1, width: 10, height: 10 }],
+      clientRequestId: "request-1"
+    });
+
+    expect(prisma.annotation.create).not.toHaveBeenCalled();
+    expect(annotation.id).toBe("annotation-1");
   });
 });

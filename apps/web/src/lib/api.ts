@@ -320,6 +320,7 @@ export function createTextNoteAnnotation(
     pageWidth: number;
     pageHeight: number;
     color?: string;
+    clientRequestId?: string;
   }
 ) {
   return apiRequest<AnnotationRecord>(
@@ -335,7 +336,8 @@ export function createTextNoteAnnotation(
         pageWidth: input.pageWidth,
         pageHeight: input.pageHeight,
         pageRotation: 0,
-        deviceId: "web"
+        deviceId: "web",
+        clientRequestId: input.clientRequestId
       })
     },
     token
@@ -353,6 +355,7 @@ export function createHighlightAnnotation(
     pageHeight: number;
     color?: string;
     note?: string | null;
+    clientRequestId?: string;
   }
 ) {
   return apiRequest<AnnotationRecord>(
@@ -369,7 +372,8 @@ export function createHighlightAnnotation(
         pageWidth: input.pageWidth,
         pageHeight: input.pageHeight,
         pageRotation: 0,
-        deviceId: "web"
+        deviceId: "web",
+        clientRequestId: input.clientRequestId
       })
     },
     token
