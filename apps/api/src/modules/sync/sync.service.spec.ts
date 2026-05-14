@@ -9,6 +9,9 @@ function createService(latest: { id: string; createdAt: Date } | null) {
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({})
+    },
+    file: {
+      findFirst: vi.fn().mockResolvedValue({ id: "file-1" })
     }
   };
   const redis = { limit: vi.fn().mockResolvedValue(undefined) };
@@ -47,5 +50,34 @@ describe("SyncService.changes", () => {
 
     expect(() => service.changes("user-1", "not-a-date")).toThrow(BadRequestException);
     expect(prisma.syncChange.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("SyncService.submit", () => {
+  it("scopes idempotency to the current user", async () => {
+    const { service, prisma } = createService(null);
+
+    await service.submit("user-1", {
+      entityType: "file",
+      entityId: "file-1",
+      operation: "update",
+      clientRequestId: "request-1"
+    });
+
+    expect(prisma.syncChange.findUnique).toHaveBeenCalledWith({ where: { userId_clientRequestId: { userId: "user-1", clientRequestId: "request-1" } } });
+  });
+
+  it("rejects changes for files outside the current user", async () => {
+    const { service, prisma } = createService(null);
+    prisma.file.findFirst.mockResolvedValue(null);
+
+    await expect(service.submit("user-1", {
+      fileId: "file-2",
+      entityType: "annotation",
+      entityId: "annotation-1",
+      operation: "update",
+      clientRequestId: "request-2"
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.syncChange.create).not.toHaveBeenCalled();
   });
 });

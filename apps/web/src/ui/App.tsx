@@ -243,6 +243,12 @@ export function App() {
       applyFileRecord(updated);
       setFileActionError(null);
     } catch (error) {
+      if (!shouldQueueActionError(error)) {
+        applyFileRecord(file);
+        setFileActionError(error instanceof Error ? error.message : "Failed to rename file");
+        return;
+      }
+
       await queuePendingFileRename(file.id, name);
       setFileActionError(error instanceof Error ? `${error.message}. Rename queued for retry.` : "Rename queued for retry.");
     }
@@ -262,6 +268,13 @@ export function App() {
       setFileActionError(null);
       queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
     } catch (error) {
+      if (!shouldQueueActionError(error)) {
+        queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+        setSelectedFile(file);
+        setFileActionError(error instanceof Error ? error.message : "Failed to delete file");
+        return;
+      }
+
       await queuePendingFileDelete(file.id);
       setFileActionError(error instanceof Error ? `${error.message}. Delete queued for retry.` : "Delete queued for retry.");
     }
@@ -379,7 +392,7 @@ export function App() {
       queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
       queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
     } catch (error) {
-      if (!shouldQueueUploadError(error)) {
+      if (!shouldQueueActionError(error)) {
         setFileActionError(error instanceof Error ? error.message : "Failed to upload PDF");
         return;
       }
@@ -427,7 +440,7 @@ export function App() {
     }
   }
 
-  function shouldQueueUploadError(error: unknown) {
+  function shouldQueueActionError(error: unknown) {
     if (!navigator.onLine) return true;
     if (!(error instanceof Error)) return false;
     if (!("status" in error) || typeof error.status !== "number") return true;

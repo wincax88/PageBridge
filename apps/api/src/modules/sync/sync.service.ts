@@ -53,8 +53,13 @@ export class SyncService {
 
   async submit(userId: string, input: SubmitChangeInput) {
     await this.redis.limit(`rate:sync:submit:${userId}`, 600, 60);
-    const existing = await this.prisma.syncChange.findUnique({ where: { clientRequestId: input.clientRequestId } });
+    const existing = await this.prisma.syncChange.findUnique({ where: { userId_clientRequestId: { userId, clientRequestId: input.clientRequestId } } });
     if (existing) return existing;
+
+    if (input.fileId) {
+      const file = await this.prisma.file.findFirst({ where: { id: input.fileId, userId }, select: { id: true } });
+      if (!file) throw new BadRequestException("File is invalid");
+    }
 
     return this.prisma.syncChange.create({
       data: {

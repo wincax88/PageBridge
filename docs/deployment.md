@@ -19,6 +19,7 @@ Production traffic must terminate TLS before it reaches the Web and API containe
 Optional environment variables:
 
 - `S3_REGION`, defaults to `us-east-1`
+- `S3_PUBLIC_ENDPOINT`, defaults to `S3_ENDPOINT`; set this when API containers use an internal S3 endpoint but browsers need a public endpoint for presigned uploads
 - `S3_FORCE_PATH_STYLE`, defaults to `false`
 - `S3_SERVER_SIDE_ENCRYPTION`, defaults to `AES256`; set to `aws:kms` when using a KMS key
 - `S3_SSE_KMS_KEY_ID`, required when `S3_SERVER_SIDE_ENCRYPTION=aws:kms`

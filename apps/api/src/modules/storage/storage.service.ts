@@ -7,6 +7,7 @@ import { ConfigService } from "@nestjs/config";
 export class StorageService {
   private readonly bucket: string;
   private readonly client: S3Client;
+  private readonly presignClient: S3Client;
   private readonly serverSideEncryption?: ServerSideEncryption;
   private readonly sseKmsKeyId?: string;
 
@@ -15,7 +16,7 @@ export class StorageService {
     const serverSideEncryption = config.get<string>("S3_SERVER_SIDE_ENCRYPTION");
     this.serverSideEncryption = serverSideEncryption === "AES256" || serverSideEncryption === "aws:kms" ? serverSideEncryption : undefined;
     this.sseKmsKeyId = config.get<string>("S3_SSE_KMS_KEY_ID");
-    this.client = new S3Client({
+    const clientOptions = {
       endpoint: config.get<string>("S3_ENDPOINT"),
       region: config.get<string>("S3_REGION") ?? "us-east-1",
       forcePathStyle: config.get<string>("S3_FORCE_PATH_STYLE") === "true",
@@ -23,6 +24,11 @@ export class StorageService {
         accessKeyId: config.get<string>("S3_ACCESS_KEY_ID") ?? "pagebridge",
         secretAccessKey: config.get<string>("S3_SECRET_ACCESS_KEY") ?? "pagebridge-secret"
       }
+    };
+    this.client = new S3Client(clientOptions);
+    this.presignClient = new S3Client({
+      ...clientOptions,
+      endpoint: config.get<string>("S3_PUBLIC_ENDPOINT") || clientOptions.endpoint
     });
   }
 
@@ -41,6 +47,14 @@ export class StorageService {
   createPresignedPutUrl(storageKey: string, contentType = "application/pdf") {
     return getSignedUrl(
       this.client,
+      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ContentType: contentType, ...this.encryptionOptions() }),
+      { expiresIn: 10 * 60 }
+    );
+  }
+
+  createPublicPresignedPutUrl(storageKey: string, contentType = "application/pdf") {
+    return getSignedUrl(
+      this.presignClient,
       new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ContentType: contentType, ...this.encryptionOptions() }),
       { expiresIn: 10 * 60 }
     );

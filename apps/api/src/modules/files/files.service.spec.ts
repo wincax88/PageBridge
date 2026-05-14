@@ -22,13 +22,17 @@ function createService(overrides: {
   usedBytes?: bigint;
   deletedFiles?: Array<{ id: string; storageKey: string }>;
   deleteObject?: ReturnType<typeof vi.fn>;
+  existingFile?: typeof deletedFile | null;
 } = {}) {
   const prisma = {
     file: {
       aggregate: vi.fn().mockResolvedValue({ _sum: { sizeBytes: overrides.usedBytes ?? BigInt(0) }, _count: { id: 0 } }),
       count: vi.fn().mockResolvedValue(overrides.fileCount ?? 0),
       create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...data, pageCount: null, deletedAt: null, createdAt: new Date(), updatedAt: new Date() })),
-      findFirst: vi.fn().mockResolvedValue(deletedFile),
+      findFirst: vi.fn().mockImplementation(({ where }) => {
+        if (where.id === "file-1" && where.userId === "user-1" && where.deletedAt === undefined) return Promise.resolve(overrides.existingFile ?? null);
+        return Promise.resolve(deletedFile);
+      }),
       findMany: vi.fn().mockResolvedValue(overrides.deletedFiles ?? []),
       update: vi.fn().mockResolvedValue({ ...deletedFile, deletedAt: null }),
       delete: vi.fn().mockResolvedValue(deletedFile)
@@ -87,6 +91,20 @@ describe("FilesService.completeUpload", () => {
       storageKey: "users/user-1/files/file-1.pdf"
     })).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.file.create).not.toHaveBeenCalled();
+  });
+
+  it("returns an existing completed upload when the client retries", async () => {
+    const { service, prisma } = createService({ existingFile: deletedFile });
+
+    const file = await service.completeUpload("user-1", {
+      fileId: "file-1",
+      name: "paper.pdf",
+      sizeBytes: 1234,
+      storageKey: "users/user-1/files/file-1.pdf"
+    });
+
+    expect(prisma.file.create).not.toHaveBeenCalled();
+    expect(file.sizeBytes).toBe("1234");
   });
 });
 

@@ -108,7 +108,7 @@ export class FilesService {
       fileId,
       name: normalizedName,
       storageKey,
-      uploadUrl: await this.storage.createPresignedPutUrl(storageKey),
+      uploadUrl: await this.storage.createPublicPresignedPutUrl(storageKey),
       uploadHeaders: this.storage.getPresignedPutHeaders()
     };
   }
@@ -119,6 +119,11 @@ export class FilesService {
     const expectedStorageKey = this.storage.buildUserFileKey(userId, input.fileId);
     if (!input.fileId || input.storageKey !== expectedStorageKey) throw new BadRequestException("Upload target is invalid");
     await this.ensureUploadedObject(input.storageKey, input.sizeBytes);
+    const existingFile = await this.prisma.file.findFirst({ where: { id: input.fileId, userId } });
+    if (existingFile) {
+      if (existingFile.storageKey !== input.storageKey || existingFile.sizeBytes !== BigInt(input.sizeBytes)) throw new BadRequestException("Upload target is invalid");
+      return { ...existingFile, sizeBytes: existingFile.sizeBytes.toString() };
+    }
     await this.ensureFileCountQuota(userId);
     await this.ensureStorageQuota(userId, input.sizeBytes);
 

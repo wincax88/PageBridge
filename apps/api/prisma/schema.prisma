@@ -121,10 +121,11 @@ model SyncChange {
   operation       ChangeOperation
   baseVersion     Int?
   nextVersion     Int?
-  clientRequestId String           @unique
+  clientRequestId String
   payload         Json?
   createdAt       DateTime         @default(now())
 
   @@index([userId, createdAt])
   @@index([fileId, createdAt])
+  @@unique([userId, clientRequestId])
 }
