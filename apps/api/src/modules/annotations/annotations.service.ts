@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -58,23 +59,7 @@ export class AnnotationsService {
     }
 
     const { clientRequestId: _clientRequestId, ...createInput } = input;
-    const annotation = await this.prisma.annotation.create({
-      data: {
-        userId,
-        fileId,
-        type: createInput.type,
-        page: createInput.page,
-        color: createInput.color,
-        text: createInput.text,
-        note: createInput.note,
-        quadPoints: createInput.quadPoints as never,
-        rect: createInput.rect as never,
-        pageWidth: createInput.pageWidth,
-        pageHeight: createInput.pageHeight,
-        pageRotation: createInput.pageRotation,
-        deviceId: createInput.deviceId
-      }
-    });
+    const annotation = await this.createAnnotationRecord(userId, fileId, createInput, input.clientRequestId);
     await this.recordChange(userId, fileId, "create", annotation.id, annotation.version, annotation, input.clientRequestId);
     return annotation;
   }
@@ -113,18 +98,55 @@ export class AnnotationsService {
     payload: unknown,
     clientRequestId: string = randomUUID()
   ) {
-    await this.prisma.syncChange.create({
-      data: {
-        userId,
-        fileId,
-        entityType: "annotation",
-        entityId,
-        operation,
-        nextVersion,
-        clientRequestId,
-        payload: payload as never
+    try {
+      await this.prisma.syncChange.create({
+        data: {
+          userId,
+          fileId,
+          entityType: "annotation",
+          entityId,
+          operation,
+          nextVersion,
+          clientRequestId,
+          payload: payload as never
+        }
+      });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+
+      const existingChange = await this.prisma.syncChange.findUnique({ where: { userId_clientRequestId: { userId, clientRequestId } } });
+      if (!existingChange || existingChange.entityType !== "annotation" || existingChange.operation !== operation || existingChange.fileId !== fileId || existingChange.entityId !== entityId) {
+        throw new BadRequestException("Annotation request is invalid");
       }
-    });
+    }
+  }
+
+  private async createAnnotationRecord(userId: string, fileId: string, input: Omit<AnnotationInput, "clientRequestId">, clientRequestId?: string) {
+    try {
+      return await this.prisma.annotation.create({
+        data: {
+          ...(clientRequestId ? { id: clientRequestId } : {}),
+          userId,
+          fileId,
+          type: input.type,
+          page: input.page,
+          color: input.color,
+          text: input.text,
+          note: input.note,
+          quadPoints: input.quadPoints as never,
+          rect: input.rect as never,
+          pageWidth: input.pageWidth,
+          pageHeight: input.pageHeight,
+          pageRotation: input.pageRotation,
+          deviceId: input.deviceId
+        }
+      });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002" || !clientRequestId) throw error;
+      const existingAnnotation = await this.prisma.annotation.findFirst({ where: { id: clientRequestId, userId, fileId } });
+      if (!existingAnnotation) throw new BadRequestException("Annotation request is invalid");
+      return existingAnnotation;
+    }
   }
 
   private async ensureAnnotation(userId: string, fileId: string, annotationId: string) {
@@ -149,6 +171,7 @@ export class AnnotationsService {
     if (input.pageHeight !== undefined && input.pageHeight <= 0) throw new BadRequestException("Page height is invalid");
     if (input.pageRotation !== undefined && !Number.isInteger(input.pageRotation)) throw new BadRequestException("Page rotation is invalid");
     if (input.deviceId !== undefined && input.deviceId.length > 200) throw new BadRequestException("Device id is too long");
+    if (input.clientRequestId !== undefined && (!input.clientRequestId.trim() || input.clientRequestId.length > 200)) throw new BadRequestException("Client request id is invalid");
     if (input.baseVersion !== undefined && (!Number.isInteger(input.baseVersion) || input.baseVersion < 1)) throw new BadRequestException("Annotation version is invalid");
     if (input.rect !== undefined && !this.isValidRect(input.rect)) throw new BadRequestException("Annotation rect is invalid");
     if (input.quadPoints !== undefined && !this.isValidQuadPoints(input.quadPoints)) throw new BadRequestException("Annotation quad points are invalid");

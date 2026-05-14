@@ -1,4 +1,5 @@
-import { ConflictException } from "@nestjs/common";
+import { BadRequestException, ConflictException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { AnnotationsService } from "./annotations.service";
 
@@ -76,5 +77,86 @@ describe("AnnotationsService.create", () => {
 
     expect(prisma.annotation.create).not.toHaveBeenCalled();
     expect(annotation.id).toBe("annotation-1");
+  });
+
+  it("uses the client request id as the annotation id", async () => {
+    const { service, prisma } = createService();
+
+    await service.create("user-1", "file-1", {
+      type: "highlight",
+      page: 1,
+      text: "selected text",
+      quadPoints: [{ x: 1, y: 1, width: 10, height: 10 }],
+      clientRequestId: "request-1"
+    });
+
+    expect(prisma.annotation.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ id: "request-1" })
+    }));
+    expect(prisma.syncChange.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ clientRequestId: "request-1" })
+    }));
+  });
+
+  it("returns the existing annotation when concurrent creates race", async () => {
+    const { service, prisma } = createService();
+    prisma.annotation.create.mockRejectedValue(new Prisma.PrismaClientKnownRequestError("duplicate", { code: "P2002", clientVersion: "test" }));
+
+    const annotation = await service.create("user-1", "file-1", {
+      type: "highlight",
+      page: 1,
+      text: "selected text",
+      quadPoints: [{ x: 1, y: 1, width: 10, height: 10 }],
+      clientRequestId: "annotation-1"
+    });
+
+    expect(annotation.id).toBe("annotation-1");
+  });
+
+  it("rejects blank client request ids", async () => {
+    const { service, prisma } = createService();
+
+    await expect(service.create("user-1", "file-1", {
+      type: "highlight",
+      page: 1,
+      text: "selected text",
+      quadPoints: [{ x: 1, y: 1, width: 10, height: 10 }],
+      clientRequestId: " "
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.annotation.create).not.toHaveBeenCalled();
+  });
+
+  it("treats duplicate sync changes as an idempotent create", async () => {
+    const { service, prisma } = createService();
+    prisma.annotation.create.mockResolvedValue({
+      id: "request-1",
+      fileId: "file-1",
+      userId: "user-1",
+      type: "highlight",
+      page: 1,
+      color: "#FFE066",
+      text: "selected text",
+      note: null,
+      version: 1,
+      deletedAt: null,
+      updatedAt: new Date()
+    });
+    prisma.syncChange.create.mockRejectedValue(new Prisma.PrismaClientKnownRequestError("duplicate", { code: "P2002", clientVersion: "test" }));
+    prisma.syncChange.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        entityType: "annotation",
+        operation: "create",
+        fileId: "file-1",
+        entityId: "request-1"
+      });
+
+    await expect(service.create("user-1", "file-1", {
+      type: "highlight",
+      page: 1,
+      text: "selected text",
+      quadPoints: [{ x: 1, y: 1, width: 10, height: 10 }],
+      clientRequestId: "request-1"
+    })).resolves.toMatchObject({ id: "request-1" });
   });
 });
