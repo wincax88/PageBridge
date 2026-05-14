@@ -156,7 +156,10 @@ export class FilesService {
   }
 
   async softDelete(userId: string, fileId: string) {
-    await this.ensureFile(userId, fileId);
+    const current = await this.prisma.file.findFirst({ where: { id: fileId, userId } });
+    if (!current) throw new NotFoundException("File not found");
+    if (current.deletedAt) return { ...current, sizeBytes: current.sizeBytes.toString() };
+
     const file = await this.prisma.file.update({ where: { id: fileId }, data: { deletedAt: new Date() } });
     await this.recordChange(userId, fileId, "delete", fileId, { deletedAt: file.deletedAt?.toISOString() });
     return { ...file, sizeBytes: file.sizeBytes.toString() };

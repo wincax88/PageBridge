@@ -407,8 +407,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       await saveReadingProgress(token, payload.fileId, payload.page, payload.zoomValue, payload.zoomMode, payload.scrollOffset);
       await removePendingReadingProgress(payload.fileId);
       setSyncStatus("synced");
-    } catch {
-      await queuePendingReadingProgress(payload);
+    } catch (err) {
+      if (shouldQueueActionError(err)) await queuePendingReadingProgress(payload);
       setSyncStatus("failed");
     }
   }
@@ -446,7 +446,11 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     try {
       for (const change of pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
         const payload = change.payload as PendingReadingProgressPayload;
-        await saveReadingProgress(token, payload.fileId, payload.page, payload.zoomValue, payload.zoomMode, payload.scrollOffset);
+        try {
+          await saveReadingProgress(token, payload.fileId, payload.page, payload.zoomValue, payload.zoomMode, payload.scrollOffset);
+        } catch (err) {
+          if (shouldQueueActionError(err)) throw err;
+        }
         if (change.id !== undefined) await offlineDb.pendingChanges.delete(change.id);
       }
       setSyncStatus("synced");

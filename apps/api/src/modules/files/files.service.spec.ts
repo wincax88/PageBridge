@@ -23,6 +23,7 @@ function createService(overrides: {
   deletedFiles?: Array<{ id: string; storageKey: string }>;
   deleteObject?: ReturnType<typeof vi.fn>;
   existingFile?: typeof deletedFile | null;
+  activeFile?: typeof deletedFile | null;
 } = {}) {
   const prisma = {
     file: {
@@ -30,7 +31,9 @@ function createService(overrides: {
       count: vi.fn().mockResolvedValue(overrides.fileCount ?? 0),
       create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...data, pageCount: null, deletedAt: null, createdAt: new Date(), updatedAt: new Date() })),
       findFirst: vi.fn().mockImplementation(({ where }) => {
-        if (where.id === "file-1" && where.userId === "user-1" && where.deletedAt === undefined) return Promise.resolve(overrides.existingFile ?? null);
+        const hasDeletedAtFilter = Object.prototype.hasOwnProperty.call(where, "deletedAt");
+        if (where.id === "file-1" && where.userId === "user-1" && !hasDeletedAtFilter) return Promise.resolve(overrides.existingFile ?? overrides.activeFile ?? null);
+        if (where.id === "file-1" && where.userId === "user-1") return Promise.resolve(overrides.activeFile ?? deletedFile);
         return Promise.resolve(deletedFile);
       }),
       findMany: vi.fn().mockResolvedValue(overrides.deletedFiles ?? []),
@@ -109,6 +112,16 @@ describe("FilesService.completeUpload", () => {
 });
 
 describe("FilesService trash operations", () => {
+  it("treats repeated soft deletes as idempotent", async () => {
+    const alreadyDeleted = { ...deletedFile, deletedAt: new Date() };
+    const { service, prisma } = createService({ activeFile: alreadyDeleted });
+
+    await expect(service.softDelete("user-1", "file-1")).resolves.toMatchObject({ id: "file-1", sizeBytes: "1234" });
+
+    expect(prisma.file.update).not.toHaveBeenCalled();
+    expect(prisma.syncChange.create).not.toHaveBeenCalled();
+  });
+
   it("checks storage quota before restoring a deleted file", async () => {
     const { service, prisma } = createService({ usedBytes: BigInt(1024 * 1024 * 1024) });
 
