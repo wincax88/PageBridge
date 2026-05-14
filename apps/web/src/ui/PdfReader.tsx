@@ -505,6 +505,13 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       setSelectedAnnotationId(created.id);
       setAnnotationStatus("idle");
     } catch (err) {
+      if (shouldQueueActionError(err)) {
+        await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "text_note", input);
+        return;
+      }
+
+      setNoteDraftInput(noteDraftInput);
+      setNoteDraftText(input.note);
       setAnnotationStatus("failed");
       setError(err instanceof Error ? err.message : "Failed to save annotation");
     }
@@ -699,6 +706,18 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       setAnnotationStatus("idle");
       selection.removeAllRanges();
     } catch (err) {
+      if (shouldQueueActionError(err)) {
+        await queuePendingAnnotationCreate(`offline-${crypto.randomUUID()}`, file.id, "highlight", {
+          page: pageNumber,
+          text: selectedText,
+          quadPoints,
+          pageWidth: basePageWidth,
+          pageHeight: basePageHeight
+        });
+        selection.removeAllRanges();
+        return;
+      }
+
       await handleAnnotationError(err, "Failed to save highlight");
     }
   }
@@ -722,6 +741,12 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       setDeletedAnnotation({ annotation, expiresAt: Date.now() + 8000 });
       setAnnotationStatus("idle");
     } catch (err) {
+      if (shouldQueueActionError(err)) {
+        await queuePendingAnnotationDelete(annotationId);
+        setDeletedAnnotation({ annotation, expiresAt: Date.now() + 8000 });
+        return;
+      }
+
       await handleAnnotationError(err, "Failed to delete annotation");
     }
   }
@@ -747,8 +772,19 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       updateAnnotations((current) => current.map((annotation) => (annotation.id === updated.id ? updated : annotation)));
       setAnnotationStatus("idle");
     } catch (err) {
+      if (shouldQueueActionError(err)) {
+        await queuePendingAnnotationUpdate(selectedAnnotation.id, input);
+        return;
+      }
+
       await handleAnnotationError(err, "Failed to update annotation");
     }
+  }
+
+  function shouldQueueActionError(error: unknown) {
+    if (!navigator.onLine) return true;
+    if (!(error instanceof ApiError)) return true;
+    return error.status === 408 || error.status === 429 || error.status >= 500;
   }
 
   async function handleAnnotationError(err: unknown, fallbackMessage: string) {
