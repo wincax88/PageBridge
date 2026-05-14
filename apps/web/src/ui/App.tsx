@@ -16,12 +16,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { deleteFile, emptyTrash, getStorageUsage, getSyncState, listDeletedFiles, listFiles, listSyncChanges, login, logout, permanentlyDeleteFile, register, renameFile, restoreFile, uploadPdf, type DeletedFileRecord, type FileRecord } from "../lib/api";
+import { deleteFile, emptyTrash, getStorageUsage, getSyncState, listDeletedFiles, listFiles, listSyncChanges, login, logout, permanentlyDeleteFile, refreshAccessToken, register, renameFile, restoreFile, uploadPdf, type DeletedFileRecord, type FileRecord } from "../lib/api";
 import { offlineDb } from "../lib/offline-db";
 import { useAuthStore } from "../store/auth-store";
 
 const PdfReader = lazy(() => import("./PdfReader"));
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
+const MAX_OFFLINE_UPLOAD_QUEUE_BYTES = 25 * 1024 * 1024;
 const SYNC_POLL_INTERVAL_MS = 2000;
 
 interface PendingFileRenamePayload {
@@ -59,10 +60,33 @@ export function App() {
   const [deleteTarget, setDeleteTarget] = useState<FileRecord | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [documentView, setDocumentView] = useState<"grid" | "list">("grid");
+  const [sessionRestored, setSessionRestored] = useState(false);
 
   useEffect(() => {
     selectedFileRef.current = selectedFile;
   }, [selectedFile]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreSession() {
+      if (accessToken) {
+        setSessionRestored(true);
+        return;
+      }
+
+      try {
+        await refreshAccessToken();
+      } finally {
+        if (!cancelled) setSessionRestored(true);
+      }
+    }
+
+    void restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
 
   const filesQuery = useQuery({
     queryKey: ["files", accessToken],
@@ -355,8 +379,13 @@ export function App() {
       queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
       queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
     } catch (error) {
-      await queuePendingFileUpload(file);
-      setFileActionError(error instanceof Error ? `${error.message}. Upload queued for retry.` : "Upload queued for retry.");
+      if (!shouldQueueUploadError(error)) {
+        setFileActionError(error instanceof Error ? error.message : "Failed to upload PDF");
+        return;
+      }
+
+      const queued = await queuePendingFileUpload(file);
+      setFileActionError(queued ? (error instanceof Error ? `${error.message}. Upload queued for retry.` : "Upload queued for retry.") : "Upload failed and could not be queued locally. Please retry when online.");
     }
   }
 
@@ -369,20 +398,40 @@ export function App() {
   }
 
   async function queuePendingFileUpload(file: File) {
-    await offlineDb.pendingChanges.add({
-      entityType: "file",
-      entityId: `upload-${crypto.randomUUID()}`,
-      operation: "create",
-      payload: {
-        name: file.name,
-        type: file.type,
-        lastModified: file.lastModified,
-        data: await file.arrayBuffer()
-      } satisfies PendingFileUploadPayload,
-      createdAt: new Date().toISOString()
-    });
-    setFileSyncStatus("queued");
-    setFileActionError("Upload queued. It will start when you are back online.");
+    if (file.size > MAX_OFFLINE_UPLOAD_QUEUE_BYTES) {
+      setFileSyncStatus("failed");
+      setFileActionError("This PDF is too large to queue offline. Please upload it when you are online.");
+      return false;
+    }
+
+    try {
+      await offlineDb.pendingChanges.add({
+        entityType: "file",
+        entityId: `upload-${crypto.randomUUID()}`,
+        operation: "create",
+        payload: {
+          name: file.name,
+          type: file.type,
+          lastModified: file.lastModified,
+          data: await file.arrayBuffer()
+        } satisfies PendingFileUploadPayload,
+        createdAt: new Date().toISOString()
+      });
+      setFileSyncStatus("queued");
+      setFileActionError("Upload queued. It will start when you are back online.");
+      return true;
+    } catch {
+      setFileSyncStatus("failed");
+      setFileActionError("Could not queue this PDF locally. Browser storage may be full; please retry when online.");
+      return false;
+    }
+  }
+
+  function shouldQueueUploadError(error: unknown) {
+    if (!navigator.onLine) return true;
+    if (!(error instanceof Error)) return false;
+    if (!("status" in error) || typeof error.status !== "number") return true;
+    return error.status === 408 || error.status === 429 || error.status >= 500;
   }
 
   const files = filesQuery.data ?? [];
@@ -401,6 +450,10 @@ export function App() {
   const recentFiles = filteredFiles.slice(0, 2);
   const effectiveDocumentView = documentView;
   const pageTitle = getPageTitle(location.pathname);
+
+  if (!sessionRestored) {
+    return <main className="auth-shell"><section className="auth-panel"><p>正在恢复会话...</p></section></main>;
+  }
 
   if (!accessToken) {
     if (location.pathname !== "/login") return <Navigate to="/login" replace />;

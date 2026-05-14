@@ -3,9 +3,9 @@ import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
 type AnnotationType = "highlight" | "text_note";
-const MAX_ANNOTATION_TEXT_LENGTH = 20000;
+const MAX_ANNOTATION_TEXT_LENGTH = 5000;
 const MAX_ANNOTATION_NOTE_LENGTH = 10000;
-const MAX_QUAD_POINTS = 100;
+const MAX_QUAD_POINTS = 50;
 const MAX_COORDINATE_VALUE = 100000;
 
 interface AnnotationRect {

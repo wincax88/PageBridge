@@ -65,6 +65,7 @@ interface UploadTargetRecord {
   name: string;
   storageKey: string;
   uploadUrl: string;
+  uploadHeaders: Record<string, string>;
 }
 
 export interface SyncChangeRecord {
@@ -114,7 +115,7 @@ function fetchApi(path: string, options: RequestInit = {}, token?: string, isJso
   });
 }
 
-async function refreshAccessToken() {
+export async function refreshAccessToken() {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = performRefreshAccessToken().finally(() => {
@@ -193,7 +194,7 @@ export async function uploadPdf(token: string, file: File) {
 
   const response = await fetch(target.uploadUrl, {
     method: "PUT",
-    headers: { "Content-Type": "application/pdf" },
+    headers: target.uploadHeaders,
     body: file
   });
 

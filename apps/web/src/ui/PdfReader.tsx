@@ -109,6 +109,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const renderTaskRef = useRef<pdfjs.RenderTask | null>(null);
+  const renderSequenceRef = useRef(0);
   const viewportRef = useRef<pdfjs.PageViewport | null>(null);
   const pendingScrollOffsetRef = useRef<number | null>(null);
   const restoredFileIdRef = useRef<string | null>(null);
@@ -298,8 +299,11 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     async function renderPage() {
       if (!pdf || !canvasRef.current) return;
 
+      const renderSequence = renderSequenceRef.current + 1;
+      renderSequenceRef.current = renderSequence;
       renderTaskRef.current?.cancel();
       const page = await pdf.getPage(pageNumber);
+      if (cancelled || renderSequenceRef.current !== renderSequence) return;
       const viewport = page.getViewport({ scale });
       viewportRef.current = viewport;
       const canvas = canvasRef.current;
@@ -315,7 +319,9 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
       try {
         await task.promise;
+        if (cancelled || renderTaskRef.current !== task || renderSequenceRef.current !== renderSequence) return;
         await renderTextLayer(page, viewport);
+        if (cancelled || renderTaskRef.current !== task || renderSequenceRef.current !== renderSequence) return;
         restorePendingScrollOffset();
       } catch (err) {
         if (!cancelled && !(err instanceof Error && err.name === "RenderingCancelledException")) {

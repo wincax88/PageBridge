@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, type ServerSideEncryption } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, type ServerSideEncryption } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -46,6 +46,14 @@ export class StorageService {
     );
   }
 
+  getPresignedPutHeaders(contentType = "application/pdf") {
+    return {
+      "Content-Type": contentType,
+      ...(this.serverSideEncryption ? { "x-amz-server-side-encryption": this.serverSideEncryption } : {}),
+      ...(this.serverSideEncryption === "aws:kms" && this.sseKmsKeyId ? { "x-amz-server-side-encryption-aws-kms-key-id": this.sseKmsKeyId } : {})
+    };
+  }
+
   async getPdf(storageKey: string) {
     const object = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: storageKey }));
     const bytes = await object.Body?.transformToByteArray();
@@ -58,6 +66,21 @@ export class StorageService {
 
   async deleteObject(storageKey: string) {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: storageKey }));
+  }
+
+  async listObjectKeys(prefix: string) {
+    const objects: Array<{ key: string; lastModified?: Date }> = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const response = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: continuationToken }));
+      for (const object of response.Contents ?? []) {
+        if (object.Key) objects.push({ key: object.Key, lastModified: object.LastModified });
+      }
+      continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+
+    return objects;
   }
 
   buildUserFileKey(userId: string, fileId: string) {

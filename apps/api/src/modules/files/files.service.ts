@@ -15,6 +15,7 @@ const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 const FREE_USER_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024;
 const FREE_USER_FILE_COUNT_QUOTA = 500;
 const SOFT_DELETE_RETENTION_DAYS = 30;
+const ORPHAN_UPLOAD_RETENTION_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class FilesService {
@@ -95,6 +96,7 @@ export class FilesService {
   async createUploadTarget(userId: string, name: string, sizeBytes: number) {
     await this.purgeExpiredDeletedFiles(userId);
     await this.redis.limit(`rate:upload:${userId}`, 30, 60 * 60);
+    await this.maybePurgeOrphanUploadedObjects(userId);
     const normalizedName = this.normalizeFileName(name);
     this.validateUploadSize(sizeBytes);
     await this.ensureFileCountQuota(userId);
@@ -106,7 +108,8 @@ export class FilesService {
       fileId,
       name: normalizedName,
       storageKey,
-      uploadUrl: await this.storage.createPresignedPutUrl(storageKey)
+      uploadUrl: await this.storage.createPresignedPutUrl(storageKey),
+      uploadHeaders: this.storage.getPresignedPutHeaders()
     };
   }
 
@@ -268,6 +271,31 @@ export class FilesService {
 
     for (const file of expiredFiles) {
       await this.deleteStoredFile(file.id, file.storageKey);
+    }
+  }
+
+  private async maybePurgeOrphanUploadedObjects(userId: string) {
+    try {
+      await this.redis.limit(`rate:orphan-upload-cleanup:${userId}`, 1, 60 * 60);
+      await this.purgeOrphanUploadedObjects(userId);
+    } catch {
+      // Orphan cleanup is best-effort and should not block a fresh upload target.
+    }
+  }
+
+  private async purgeOrphanUploadedObjects(userId: string) {
+    const referencedFiles = await this.prisma.file.findMany({
+      where: { userId },
+      select: { storageKey: true }
+    });
+    const referencedKeys = new Set(referencedFiles.map((file) => file.storageKey));
+    const cutoff = Date.now() - ORPHAN_UPLOAD_RETENTION_MS;
+    const objects = await this.storage.listObjectKeys(`users/${userId}/files/`);
+
+    for (const object of objects) {
+      if (referencedKeys.has(object.key)) continue;
+      if (!object.lastModified || object.lastModified.getTime() > cutoff) continue;
+      await this.storage.deleteObject(object.key);
     }
   }
 
