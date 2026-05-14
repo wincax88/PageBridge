@@ -100,7 +100,7 @@ model ReadingProgress {
   file         File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  deviceId     String?
+  deviceId     String
   page         Int      @default(1)
   scrollOffset Float    @default(0)
   zoomMode     String   @default("fit_width")

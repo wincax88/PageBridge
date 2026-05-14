@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
@@ -127,18 +128,9 @@ export class FilesService {
     await this.ensureFileCountQuota(userId);
     await this.ensureStorageQuota(userId, input.sizeBytes);
 
-    const created = await this.prisma.file.create({
-      data: {
-        id: input.fileId,
-        userId,
-        name,
-        sizeBytes: BigInt(input.sizeBytes),
-        mimeType: "application/pdf",
-        storageKey: input.storageKey
-      }
-    });
-    await this.recordChange(userId, created.id, "create", created.id, { name: created.name, sizeBytes: created.sizeBytes.toString() });
-    return { ...created, sizeBytes: created.sizeBytes.toString() };
+    const result = await this.createCompletedUpload(userId, input.fileId, name, input.sizeBytes, input.storageKey);
+    if (result.created) await this.recordChange(userId, result.file.id, "create", result.file.id, { name: result.file.name, sizeBytes: result.file.sizeBytes.toString() });
+    return { ...result.file, sizeBytes: result.file.sizeBytes.toString() };
   }
 
   async getContent(userId: string, fileId: string) {
@@ -256,6 +248,28 @@ export class FilesService {
     const nextBytes = currentBytes + BigInt(incomingBytes);
     if (nextBytes > BigInt(FREE_USER_STORAGE_QUOTA_BYTES)) {
       throw new BadRequestException("Storage quota exceeded");
+    }
+  }
+
+  private async createCompletedUpload(userId: string, fileId: string, name: string, sizeBytes: number, storageKey: string) {
+    try {
+      const file = await this.prisma.file.create({
+        data: {
+          id: fileId,
+          userId,
+          name,
+          sizeBytes: BigInt(sizeBytes),
+          mimeType: "application/pdf",
+          storageKey
+        }
+      });
+      return { file, created: true };
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+
+      const existingFile = await this.prisma.file.findFirst({ where: { id: fileId, userId } });
+      if (!existingFile || existingFile.storageKey !== storageKey || existingFile.sizeBytes !== BigInt(sizeBytes)) throw new BadRequestException("Upload target is invalid");
+      return { file: existingFile, created: false };
     }
   }
 
