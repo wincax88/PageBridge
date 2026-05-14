@@ -580,7 +580,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   async function queuePendingAnnotationDelete(annotationId: string) {
     if (!file) return;
 
-    if (annotationId.startsWith("offline-")) {
+    if (await hasPendingAnnotationCreate(annotationId)) {
       await offlineDb.pendingChanges.where("entityId").equals(annotationId).delete();
     } else {
       await offlineDb.pendingChanges.add({
@@ -594,6 +594,15 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     updateAnnotations((current) => current.filter((annotation) => annotation.id !== annotationId));
     setSelectedAnnotationId((current) => (current === annotationId ? null : current));
     setAnnotationStatus("queued");
+  }
+
+  async function hasPendingAnnotationCreate(annotationId: string) {
+    const pendingCreate = await offlineDb.pendingChanges
+      .where("entityId")
+      .equals(annotationId)
+      .and((change) => change.entityType === "annotation" && change.operation === "create")
+      .first();
+    return Boolean(pendingCreate);
   }
 
   async function replayPendingAnnotationChanges() {
