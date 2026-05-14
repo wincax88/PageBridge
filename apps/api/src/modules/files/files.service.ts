@@ -140,7 +140,9 @@ export class FilesService {
 
   async rename(userId: string, fileId: string, name: string) {
     const normalizedName = this.normalizeFileName(name);
-    await this.ensureFile(userId, fileId);
+    const current = await this.ensureFile(userId, fileId);
+    if (current.name === normalizedName) return { ...current, sizeBytes: current.sizeBytes.toString() };
+
     const file = await this.prisma.file.update({ where: { id: fileId }, data: { name: normalizedName } });
     await this.recordChange(userId, fileId, "update", fileId, { name: normalizedName });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
@@ -149,7 +151,9 @@ export class FilesService {
   async updatePageCount(userId: string, fileId: string, pageCount: number) {
     if (!Number.isInteger(pageCount) || pageCount < 1) throw new BadRequestException("Page count is invalid");
 
-    await this.ensureFile(userId, fileId);
+    const current = await this.ensureFile(userId, fileId);
+    if (current.pageCount === pageCount) return { ...current, sizeBytes: current.sizeBytes.toString() };
+
     const file = await this.prisma.file.update({ where: { id: fileId }, data: { pageCount } });
     await this.recordChange(userId, fileId, "update", fileId, { pageCount });
     return { ...file, sizeBytes: file.sizeBytes.toString() };

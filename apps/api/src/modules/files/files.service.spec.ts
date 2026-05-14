@@ -2,7 +2,20 @@ import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { FilesService } from "./files.service";
 
-const deletedFile = {
+interface FileFixture {
+  id: string;
+  userId: string;
+  name: string;
+  sizeBytes: bigint;
+  mimeType: string;
+  storageKey: string;
+  pageCount: number | null;
+  deletedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const deletedFile: FileFixture = {
   id: "file-1",
   userId: "user-1",
   name: "paper.pdf",
@@ -22,8 +35,8 @@ function createService(overrides: {
   usedBytes?: bigint;
   deletedFiles?: Array<{ id: string; storageKey: string }>;
   deleteObject?: ReturnType<typeof vi.fn>;
-  existingFile?: typeof deletedFile | null;
-  activeFile?: typeof deletedFile | null;
+  existingFile?: FileFixture | null;
+  activeFile?: FileFixture | null;
 } = {}) {
   const prisma = {
     file: {
@@ -152,5 +165,25 @@ describe("FilesService trash operations", () => {
     expect(storage.deleteObject).toHaveBeenCalledTimes(2);
     expect(prisma.file.delete).toHaveBeenCalledWith({ where: { id: "file-1" } });
     expect(prisma.file.delete).toHaveBeenCalledWith({ where: { id: "file-2" } });
+  });
+});
+
+describe("FilesService update operations", () => {
+  it("does not record a rename change when the name is unchanged", async () => {
+    const { service, prisma } = createService({ activeFile: { ...deletedFile, deletedAt: null } });
+
+    await expect(service.rename("user-1", "file-1", "paper.pdf")).resolves.toMatchObject({ id: "file-1", name: "paper.pdf" });
+
+    expect(prisma.file.update).not.toHaveBeenCalled();
+    expect(prisma.syncChange.create).not.toHaveBeenCalled();
+  });
+
+  it("does not record a page count change when the value is unchanged", async () => {
+    const { service, prisma } = createService({ activeFile: { ...deletedFile, pageCount: 12, deletedAt: null } });
+
+    await expect(service.updatePageCount("user-1", "file-1", 12)).resolves.toMatchObject({ id: "file-1", pageCount: 12 });
+
+    expect(prisma.file.update).not.toHaveBeenCalled();
+    expect(prisma.syncChange.create).not.toHaveBeenCalled();
   });
 });
