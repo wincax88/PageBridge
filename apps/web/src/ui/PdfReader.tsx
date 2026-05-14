@@ -565,6 +565,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   async function queuePendingAnnotationUpdate(annotationId: string, input: PendingAnnotationUpdatePayload["input"]) {
     if (!file) return;
 
+    await removePendingAnnotationChanges(annotationId, ["update"]);
     await offlineDb.pendingChanges.add({
       entityType: "annotation",
       entityId: annotationId,
@@ -583,6 +584,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     if (await hasPendingAnnotationCreate(annotationId)) {
       await offlineDb.pendingChanges.where("entityId").equals(annotationId).delete();
     } else {
+      await removePendingAnnotationChanges(annotationId, ["update", "delete"]);
       await offlineDb.pendingChanges.add({
         entityType: "annotation",
         entityId: annotationId,
@@ -603,6 +605,15 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
       .and((change) => change.entityType === "annotation" && change.operation === "create")
       .first();
     return Boolean(pendingCreate);
+  }
+
+  async function removePendingAnnotationChanges(annotationId: string, operations: Array<"update" | "delete">) {
+    const pending = await offlineDb.pendingChanges
+      .where("entityType")
+      .equals("annotation")
+      .and((change) => change.entityId === annotationId && operations.includes(change.operation as "update" | "delete"))
+      .toArray();
+    await Promise.all(pending.map((change) => (change.id === undefined ? Promise.resolve() : offlineDb.pendingChanges.delete(change.id))));
   }
 
   async function replayPendingAnnotationChanges() {
