@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { FilesService } from "./files.service";
 
@@ -31,6 +32,7 @@ const deletedFile: FileFixture = {
 function createService(overrides: {
   contentLength?: number;
   contentType?: string;
+  pdfHeader?: Buffer;
   fileCount?: number;
   usedBytes?: bigint;
   deletedFiles?: Array<{ id: string; storageKey: string }>;
@@ -60,6 +62,7 @@ function createService(overrides: {
   const storage = {
     buildUserFileKey: vi.fn((userId: string, fileId: string) => `users/${userId}/files/${fileId}.pdf`),
     getObjectMetadata: vi.fn().mockResolvedValue({ ContentLength: overrides.contentLength ?? 1234, ContentType: overrides.contentType ?? "application/pdf" }),
+    getObjectPrefix: vi.fn().mockResolvedValue(overrides.pdfHeader ?? Buffer.from("%PDF-")),
     deleteObject: overrides.deleteObject ?? vi.fn().mockResolvedValue(undefined)
   };
 
@@ -82,6 +85,7 @@ describe("FilesService.completeUpload", () => {
     });
 
     expect(storage.getObjectMetadata).toHaveBeenCalledWith("users/user-1/files/file-1.pdf");
+    expect(storage.getObjectPrefix).toHaveBeenCalledWith("users/user-1/files/file-1.pdf", 5);
     expect(prisma.file.create).toHaveBeenCalled();
     expect(file.sizeBytes).toBe("1234");
   });
@@ -110,6 +114,18 @@ describe("FilesService.completeUpload", () => {
     expect(prisma.file.create).not.toHaveBeenCalled();
   });
 
+  it("rejects uploaded objects without a PDF header", async () => {
+    const { service, prisma } = createService({ pdfHeader: Buffer.from("nope") });
+
+    await expect(service.completeUpload("user-1", {
+      fileId: "file-1",
+      name: "paper.pdf",
+      sizeBytes: 1234,
+      storageKey: "users/user-1/files/file-1.pdf"
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.file.create).not.toHaveBeenCalled();
+  });
+
   it("returns an existing completed upload when the client retries", async () => {
     const { service, prisma } = createService({ existingFile: deletedFile });
 
@@ -122,6 +138,20 @@ describe("FilesService.completeUpload", () => {
 
     expect(prisma.file.create).not.toHaveBeenCalled();
     expect(file.sizeBytes).toBe("1234");
+  });
+
+  it("retries serialization conflicts during completion", async () => {
+    const { service, prisma } = createService();
+    const serializationError = new Prisma.PrismaClientKnownRequestError("serialization", { code: "P2034", clientVersion: "test" });
+    prisma.$transaction.mockRejectedValueOnce(serializationError).mockImplementation((callback) => callback(prisma));
+
+    await expect(service.completeUpload("user-1", {
+      fileId: "file-1",
+      name: "paper.pdf",
+      sizeBytes: 1234,
+      storageKey: "users/user-1/files/file-1.pdf"
+    })).resolves.toMatchObject({ id: "file-1", sizeBytes: "1234" });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -26,8 +26,8 @@ export interface CachedAnnotationList {
 
 class PageBridgeDb extends Dexie {
   pendingChanges!: Table<PendingChange, number>;
-  pdfFiles!: Table<CachedPdfFile, string>;
-  annotationLists!: Table<CachedAnnotationList, string>;
+  pdfFiles!: Table<CachedPdfFile, [string, string]>;
+  annotationLists!: Table<CachedAnnotationList, [string, string]>;
 
   constructor() {
     super("pagebridge");
@@ -47,6 +47,17 @@ class PageBridgeDb extends Dexie {
       pendingChanges: "++id, userKey, [userKey+entityType], [userKey+entityId], createdAt",
       pdfFiles: "[userKey+fileId], userKey, updatedAt",
       annotationLists: "[userKey+fileId], userKey, updatedAt"
+    }).upgrade(async (transaction) => {
+      const legacyUserKey = typeof localStorage === "undefined" ? "legacy" : localStorage.getItem("pagebridge.userEmail") ?? "legacy";
+      await transaction.table("pendingChanges").toCollection().modify((change) => {
+        if (!change.userKey) change.userKey = legacyUserKey;
+      });
+      await transaction.table("pdfFiles").toCollection().modify((file) => {
+        if (!file.userKey) file.userKey = legacyUserKey;
+      });
+      await transaction.table("annotationLists").toCollection().modify((list) => {
+        if (!list.userKey) list.userKey = legacyUserKey;
+      });
     });
   }
 }

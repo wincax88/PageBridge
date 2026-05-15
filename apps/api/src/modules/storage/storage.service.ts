@@ -78,6 +78,12 @@ export class StorageService {
     return this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: storageKey }));
   }
 
+  async getObjectPrefix(storageKey: string, byteCount: number) {
+    const object = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: storageKey, Range: `bytes=0-${Math.max(0, byteCount - 1)}` }));
+    const bytes = await object.Body?.transformToByteArray();
+    return Buffer.from(bytes ?? []);
+  }
+
   async deleteObject(storageKey: string) {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: storageKey }));
   }

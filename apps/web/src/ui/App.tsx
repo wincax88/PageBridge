@@ -174,7 +174,7 @@ export function App() {
         if (cancelled || changes.length === 0) return;
 
         const latestChange = changes.at(-1);
-        if (latestChange) syncCursorRef.current = buildSyncCursor(latestChange.createdAt, latestChange.id);
+        if (latestChange) syncCursorRef.current = buildSyncCursor(latestChange.createdAt, latestChange.id, latestChange.sequence);
         queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
         queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
         const currentFile = selectedFileRef.current;
@@ -1103,8 +1103,8 @@ function getPageTitle(pathname: string) {
   return "我的文档";
 }
 
-function buildSyncCursor(createdAt: string, id: string) {
-  return btoa(JSON.stringify({ createdAt, id })).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+function buildSyncCursor(createdAt: string, id: string, sequence: string) {
+  return btoa(JSON.stringify({ createdAt, id, sequence })).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function EmptyLibrary({ onUpload }: { onUpload: () => void }) {

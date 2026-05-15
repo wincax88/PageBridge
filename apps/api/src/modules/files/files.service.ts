@@ -17,6 +17,7 @@ const FREE_USER_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024;
 const FREE_USER_FILE_COUNT_QUOTA = 500;
 const SOFT_DELETE_RETENTION_DAYS = 30;
 const ORPHAN_UPLOAD_RETENTION_MS = 60 * 60 * 1000;
+const TRANSACTION_RETRY_ATTEMPTS = 3;
 
 @Injectable()
 export class FilesService {
@@ -70,6 +71,7 @@ export class FilesService {
     if (file.mimetype !== "application/pdf") throw new BadRequestException("Only PDF files are supported");
     if (file.size <= 0) throw new BadRequestException("PDF file is empty");
     if (file.size > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
+    this.ensurePdfHeader(file.buffer);
 
     const name = this.normalizeFileName(file.originalname);
     await this.ensureFileCountQuota(userId);
@@ -120,7 +122,8 @@ export class FilesService {
     const expectedStorageKey = this.storage.buildUserFileKey(userId, input.fileId);
     if (!input.fileId || input.storageKey !== expectedStorageKey) throw new BadRequestException("Upload target is invalid");
     await this.ensureUploadedObject(input.storageKey, input.sizeBytes);
-    const result = await this.prisma.$transaction(async (tx) => {
+    await this.ensureUploadedPdfHeader(input.storageKey);
+    const result = await this.runSerializableTransaction(async (tx) => {
       const existingFile = await tx.file.findFirst({ where: { id: input.fileId, userId } });
       if (existingFile) {
         if (existingFile.storageKey !== input.storageKey || existingFile.sizeBytes !== BigInt(input.sizeBytes)) throw new BadRequestException("Upload target is invalid");
@@ -131,7 +134,7 @@ export class FilesService {
       const completed = await this.createCompletedUpload(userId, input.fileId, name, input.sizeBytes, input.storageKey, tx);
       if (completed.created) await this.recordChange(userId, completed.file.id, "create", completed.file.id, { name: completed.file.name, sizeBytes: completed.file.sizeBytes.toString() }, tx);
       return completed;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    });
     return { ...result.file, sizeBytes: result.file.sizeBytes.toString() };
   }
 
@@ -172,14 +175,14 @@ export class FilesService {
   }
 
   async restore(userId: string, fileId: string) {
-    const file = await this.prisma.$transaction(async (tx) => {
+    const file = await this.runSerializableTransaction(async (tx) => {
       const deletedFile = await this.ensureDeletedFile(userId, fileId, tx);
       await this.ensureFileCountQuota(userId, tx);
       await this.ensureStorageQuota(userId, Number(deletedFile.sizeBytes), tx);
       const restored = await tx.file.update({ where: { id: fileId }, data: { deletedAt: null } });
       await this.recordChange(userId, fileId, "update", fileId, { deletedAt: null }, tx);
       return restored;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
@@ -238,6 +241,19 @@ export class FilesService {
   private validateUploadSize(sizeBytes: number) {
     if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) throw new BadRequestException("PDF file is empty");
     if (sizeBytes > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
+  }
+
+  private ensurePdfHeader(buffer: Buffer) {
+    if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") throw new BadRequestException("Only PDF files are supported");
+  }
+
+  private async ensureUploadedPdfHeader(storageKey: string) {
+    try {
+      this.ensurePdfHeader(await this.storage.getObjectPrefix(storageKey, 5));
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException("Uploaded PDF was not found");
+    }
   }
 
   private async ensureUploadedObject(storageKey: string, sizeBytes: number) {
@@ -337,5 +353,22 @@ export class FilesService {
       // The database is the source of truth for retention; missing objects should not block cleanup.
     }
     await this.prisma.file.delete({ where: { id: fileId } });
+  }
+
+  private async runSerializableTransaction<T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < TRANSACTION_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(callback, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      } catch (error) {
+        if (!this.isSerializationConflict(error)) throw error;
+        lastError = error;
+      }
+    }
+    throw lastError;
+  }
+
+  private isSerializationConflict(error: unknown) {
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
   }
 }

@@ -70,6 +70,7 @@ interface UploadTargetRecord {
 
 export interface SyncChangeRecord {
   id: string;
+  sequence: string;
   fileId: string | null;
   entityType: "file" | "annotation" | "reading_progress";
   entityId: string;

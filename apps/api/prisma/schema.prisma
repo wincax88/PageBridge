@@ -112,6 +112,7 @@ model ReadingProgress {
 
 model SyncChange {
   id              String           @id @default(uuid())
+  sequence        BigInt           @unique @default(autoincrement())
   userId          String
   user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   fileId          String?
@@ -126,6 +127,7 @@ model SyncChange {
   createdAt       DateTime         @default(now())
 
   @@index([userId, createdAt])
+  @@index([userId, sequence])
   @@index([fileId, createdAt])
   @@unique([userId, clientRequestId])
 }

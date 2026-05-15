@@ -2,13 +2,13 @@ import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { SyncService } from "./sync.service";
 
-function createService(latest: { id: string; createdAt: Date } | null) {
+function createService(latest: { id: string; createdAt: Date; sequence: bigint } | null) {
   const prisma = {
     syncChange: {
       findFirst: vi.fn().mockResolvedValue(latest),
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
-      create: vi.fn().mockResolvedValue({})
+      create: vi.fn().mockResolvedValue({ id: "change-created", sequence: BigInt(3) })
     },
     file: {
       findFirst: vi.fn().mockResolvedValue({ id: "file-1" })
@@ -21,16 +21,16 @@ function createService(latest: { id: string; createdAt: Date } | null) {
 describe("SyncService.state", () => {
   it("returns the latest account cursor", async () => {
     const createdAt = new Date("2026-05-10T12:00:00.000Z");
-    const { service, prisma } = createService({ id: "change-1", createdAt });
+    const { service, prisma } = createService({ id: "change-1", createdAt, sequence: BigInt(2) });
 
     await expect(service.state("user-1")).resolves.toEqual({
       latestChangeId: "change-1",
-      cursor: Buffer.from(JSON.stringify({ createdAt: "2026-05-10T12:00:00.000Z", id: "change-1" }), "utf8").toString("base64url")
+      cursor: Buffer.from(JSON.stringify({ createdAt: "2026-05-10T12:00:00.000Z", id: "change-1", sequence: "2" }), "utf8").toString("base64url")
     });
     expect(prisma.syncChange.findFirst).toHaveBeenCalledWith({
       where: { userId: "user-1" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { id: true, createdAt: true }
+      orderBy: { sequence: "desc" },
+      select: { id: true, createdAt: true, sequence: true }
     });
   });
 
@@ -39,7 +39,7 @@ describe("SyncService.state", () => {
 
     await expect(service.state("user-1")).resolves.toEqual({
       latestChangeId: null,
-      cursor: Buffer.from(JSON.stringify({ createdAt: "1970-01-01T00:00:00.000Z", id: "" }), "utf8").toString("base64url")
+      cursor: Buffer.from(JSON.stringify({ createdAt: "1970-01-01T00:00:00.000Z", id: "", sequence: "0" }), "utf8").toString("base64url")
     });
   });
 });
@@ -54,7 +54,7 @@ describe("SyncService.changes", () => {
 
   it("uses a stable compound cursor to avoid skipping same-timestamp changes", () => {
     const { service, prisma } = createService(null);
-    const cursor = Buffer.from(JSON.stringify({ createdAt: "2026-05-10T12:00:00.000Z", id: "change-1" }), "utf8").toString("base64url");
+    const cursor = Buffer.from(JSON.stringify({ createdAt: "2026-05-10T12:00:00.000Z", id: "change-1", sequence: "2" }), "utf8").toString("base64url");
 
     service.changes("user-1", cursor);
 
@@ -62,12 +62,25 @@ describe("SyncService.changes", () => {
       where: {
         userId: "user-1",
         fileId: undefined,
-        OR: [
-          { createdAt: { gt: new Date("2026-05-10T12:00:00.000Z") } },
-          { createdAt: new Date("2026-05-10T12:00:00.000Z"), id: { gt: "change-1" } }
-        ]
+        sequence: { gt: BigInt(2) }
       },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      orderBy: { sequence: "asc" },
+      take: 500
+    });
+  });
+
+  it("keeps accepting legacy timestamp cursors", () => {
+    const { service, prisma } = createService(null);
+
+    service.changes("user-1", "2026-05-10T12:00:00.000Z");
+
+    expect(prisma.syncChange.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: "user-1",
+        fileId: undefined,
+        OR: [{ createdAt: { gt: new Date("2026-05-10T12:00:00.000Z") } }]
+      },
+      orderBy: { sequence: "asc" },
       take: 500
     });
   });
@@ -97,6 +110,20 @@ describe("SyncService.submit", () => {
       entityId: "annotation-1",
       operation: "update",
       clientRequestId: "request-2"
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.syncChange.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized payloads", async () => {
+    const { service, prisma } = createService(null);
+
+    await expect(service.submit("user-1", {
+      fileId: "file-1",
+      entityType: "annotation",
+      entityId: "annotation-1",
+      operation: "update",
+      clientRequestId: "request-3",
+      payload: { value: "x".repeat(17 * 1024) }
     })).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.syncChange.create).not.toHaveBeenCalled();
   });
