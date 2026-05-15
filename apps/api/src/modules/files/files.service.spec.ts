@@ -61,6 +61,7 @@ function createService(overrides: {
   const redis = { limit: vi.fn().mockResolvedValue(undefined) };
   const storage = {
     buildUserFileKey: vi.fn((userId: string, fileId: string) => `users/${userId}/files/${fileId}.pdf`),
+    putPdf: vi.fn().mockResolvedValue(undefined),
     getObjectMetadata: vi.fn().mockResolvedValue({ ContentLength: overrides.contentLength ?? 1234, ContentType: overrides.contentType ?? "application/pdf" }),
     getObjectPrefix: vi.fn().mockResolvedValue(overrides.pdfHeader ?? Buffer.from("%PDF-")),
     deleteObject: overrides.deleteObject ?? vi.fn().mockResolvedValue(undefined)
@@ -72,6 +73,38 @@ function createService(overrides: {
     storage
   };
 }
+
+describe("FilesService.upload", () => {
+  it("creates uploaded files inside the quota transaction", async () => {
+    const { service, prisma, storage } = createService();
+
+    await service.upload("user-1", {
+      originalname: "paper.pdf",
+      mimetype: "application/pdf",
+      size: 1234,
+      buffer: Buffer.from("%PDF-file")
+    } as Express.Multer.File);
+
+    expect(storage.putPdf).toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalled();
+    expect(prisma.file.create).toHaveBeenCalled();
+    expect(prisma.syncChange.create).toHaveBeenCalled();
+  });
+
+  it("rejects multipart uploads without a PDF header", async () => {
+    const { service, prisma, storage } = createService();
+
+    await expect(service.upload("user-1", {
+      originalname: "paper.pdf",
+      mimetype: "application/pdf",
+      size: 1234,
+      buffer: Buffer.from("nope")
+    } as Express.Multer.File)).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(storage.putPdf).not.toHaveBeenCalled();
+    expect(prisma.file.create).not.toHaveBeenCalled();
+  });
+});
 
 describe("FilesService.completeUpload", () => {
   it("creates the file only after verifying the uploaded object", async () => {

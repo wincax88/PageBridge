@@ -74,24 +74,26 @@ export class FilesService {
     this.ensurePdfHeader(file.buffer);
 
     const name = this.normalizeFileName(file.originalname);
-    await this.ensureFileCountQuota(userId);
-    await this.ensureStorageQuota(userId, file.size);
-
     const fileId = randomUUID();
     const storageKey = this.storage.buildUserFileKey(userId, fileId);
     await this.storage.putPdf(storageKey, file.buffer, file.mimetype);
 
-    const created = await this.prisma.file.create({
-      data: {
-        id: fileId,
-        userId,
-        name,
-        sizeBytes: BigInt(file.size),
-        mimeType: file.mimetype,
-        storageKey
-      }
+    const created = await this.runSerializableTransaction(async (tx) => {
+      await this.ensureFileCountQuota(userId, tx);
+      await this.ensureStorageQuota(userId, file.size, tx);
+      const uploaded = await tx.file.create({
+        data: {
+          id: fileId,
+          userId,
+          name,
+          sizeBytes: BigInt(file.size),
+          mimeType: file.mimetype,
+          storageKey
+        }
+      });
+      await this.recordChange(userId, uploaded.id, "create", uploaded.id, { name: uploaded.name, sizeBytes: uploaded.sizeBytes.toString() }, tx);
+      return uploaded;
     });
-    await this.recordChange(userId, created.id, "create", created.id, { name: created.name, sizeBytes: created.sizeBytes.toString() });
 
     return { ...created, sizeBytes: created.sizeBytes.toString() };
   }

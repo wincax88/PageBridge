@@ -74,10 +74,7 @@ export class SyncService {
     const existing = await this.prisma.syncChange.findUnique({ where: { userId_clientRequestId: { userId, clientRequestId: input.clientRequestId } } });
     if (existing) return this.serializeChange(existing);
 
-    if (input.fileId) {
-      const file = await this.prisma.file.findFirst({ where: { id: input.fileId, userId }, select: { id: true } });
-      if (!file) throw new BadRequestException("File is invalid");
-    }
+    await this.ensureSubmittedEntity(userId, input);
 
     const change = await this.prisma.syncChange.create({
       data: {
@@ -119,6 +116,7 @@ export class SyncService {
     this.validateIdentifier(input.clientRequestId, "Client request id");
     if (input.fileId !== undefined) this.validateIdentifier(input.fileId, "File id");
     if (input.entityType !== "file" && !input.fileId) throw new BadRequestException("File id is required");
+    if (input.operation === "create") throw new BadRequestException("Direct sync creation is not supported");
     if (input.entityType === "reading_progress" && input.operation !== "update") throw new BadRequestException("Reading progress changes must be updates");
     if (input.baseVersion !== undefined && input.baseVersion < 1) throw new BadRequestException("Base version is invalid");
     if (input.nextVersion !== undefined && input.nextVersion < 1) throw new BadRequestException("Next version is invalid");
@@ -130,6 +128,24 @@ export class SyncService {
 
   private validateIdentifier(value: string, label: string) {
     if (!value?.trim() || value.length > MAX_SYNC_ID_LENGTH) throw new BadRequestException(`${label} is invalid`);
+  }
+
+  private async ensureSubmittedEntity(userId: string, input: SubmitChangeInput) {
+    if (input.entityType === "file") {
+      if (input.fileId && input.fileId !== input.entityId) throw new BadRequestException("File id is invalid");
+      const file = await this.prisma.file.findFirst({ where: { id: input.entityId, userId }, select: { id: true } });
+      if (!file) throw new BadRequestException("File is invalid");
+      return;
+    }
+
+    if (input.entityType === "annotation") {
+      const annotation = await this.prisma.annotation.findFirst({ where: { id: input.entityId, userId, fileId: input.fileId }, select: { id: true } });
+      if (!annotation) throw new BadRequestException("Annotation is invalid");
+      return;
+    }
+
+    const progress = await this.prisma.readingProgress.findFirst({ where: { id: input.entityId, userId, fileId: input.fileId }, select: { id: true } });
+    if (!progress) throw new BadRequestException("Reading progress is invalid");
   }
 
   private serializeChange<T extends { sequence: bigint }>(change: T) {

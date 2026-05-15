@@ -12,6 +12,12 @@ function createService(latest: { id: string; createdAt: Date; sequence: bigint }
     },
     file: {
       findFirst: vi.fn().mockResolvedValue({ id: "file-1" })
+    },
+    annotation: {
+      findFirst: vi.fn().mockResolvedValue({ id: "annotation-1" })
+    },
+    readingProgress: {
+      findFirst: vi.fn().mockResolvedValue({ id: "progress-1" })
     }
   };
   const redis = { limit: vi.fn().mockResolvedValue(undefined) };
@@ -98,6 +104,7 @@ describe("SyncService.submit", () => {
     });
 
     expect(prisma.syncChange.findUnique).toHaveBeenCalledWith({ where: { userId_clientRequestId: { userId: "user-1", clientRequestId: "request-1" } } });
+    expect(prisma.file.findFirst).toHaveBeenCalledWith({ where: { id: "file-1", userId: "user-1" }, select: { id: true } });
   });
 
   it("rejects changes for files outside the current user", async () => {
@@ -106,8 +113,8 @@ describe("SyncService.submit", () => {
 
     await expect(service.submit("user-1", {
       fileId: "file-2",
-      entityType: "annotation",
-      entityId: "annotation-1",
+      entityType: "file",
+      entityId: "file-2",
       operation: "update",
       clientRequestId: "request-2"
     })).rejects.toBeInstanceOf(BadRequestException);
@@ -124,6 +131,33 @@ describe("SyncService.submit", () => {
       operation: "update",
       clientRequestId: "request-3",
       payload: { value: "x".repeat(17 * 1024) }
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.syncChange.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects direct create submissions", async () => {
+    const { service, prisma } = createService(null);
+
+    await expect(service.submit("user-1", {
+      fileId: "file-1",
+      entityType: "annotation",
+      entityId: "annotation-1",
+      operation: "create",
+      clientRequestId: "request-4"
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.syncChange.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects changes for annotations outside the current file", async () => {
+    const { service, prisma } = createService(null);
+    prisma.annotation.findFirst.mockResolvedValue(null);
+
+    await expect(service.submit("user-1", {
+      fileId: "file-1",
+      entityType: "annotation",
+      entityId: "annotation-2",
+      operation: "update",
+      clientRequestId: "request-5"
     })).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.syncChange.create).not.toHaveBeenCalled();
   });
