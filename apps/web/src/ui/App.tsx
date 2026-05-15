@@ -173,7 +173,8 @@ export function App() {
         const changes = await listSyncChanges(accessToken, syncCursorRef.current);
         if (cancelled || changes.length === 0) return;
 
-        syncCursorRef.current = changes.at(-1)?.createdAt ?? new Date().toISOString();
+        const latestChange = changes.at(-1);
+        if (latestChange) syncCursorRef.current = buildSyncCursor(latestChange.createdAt, latestChange.id);
         queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
         queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
         const currentFile = selectedFileRef.current;
@@ -299,6 +300,7 @@ export function App() {
   async function queuePendingFileRename(fileId: string, name: string) {
     await removePendingFileChange(fileId, "update");
     await offlineDb.pendingChanges.add({
+      userKey: offlineUserKey,
       entityType: "file",
       entityId: fileId,
       operation: "update",
@@ -312,6 +314,7 @@ export function App() {
     await removePendingFileChange(fileId, "update");
     await removePendingFileChange(fileId, "delete");
     await offlineDb.pendingChanges.add({
+      userKey: offlineUserKey,
       entityType: "file",
       entityId: fileId,
       operation: "delete",
@@ -323,8 +326,8 @@ export function App() {
 
   async function removePendingFileChange(fileId: string, operation: "update" | "delete") {
     const pending = await offlineDb.pendingChanges
-      .where("entityType")
-      .equals("file")
+      .where("[userKey+entityType]")
+      .equals([offlineUserKey, "file"])
       .and((change) => change.entityId === fileId && change.operation === operation)
       .toArray();
     await Promise.all(pending.map((change) => (change.id === undefined ? Promise.resolve() : offlineDb.pendingChanges.delete(change.id))));
@@ -334,8 +337,8 @@ export function App() {
     if (!accessToken || !navigator.onLine) return;
 
     const pending = await offlineDb.pendingChanges
-      .where("entityType")
-      .equals("file")
+      .where("[userKey+entityType]")
+      .equals([offlineUserKey, "file"])
       .toArray();
     if (!pending.length) return;
 
@@ -419,6 +422,7 @@ export function App() {
 
     try {
       await offlineDb.pendingChanges.add({
+        userKey: offlineUserKey,
         entityType: "file",
         entityId: `upload-${crypto.randomUUID()}`,
         operation: "create",
@@ -463,6 +467,7 @@ export function App() {
   const recentFiles = filteredFiles.slice(0, 2);
   const effectiveDocumentView = documentView;
   const pageTitle = getPageTitle(location.pathname);
+  const offlineUserKey = userEmail ?? "anonymous";
 
   if (!sessionRestored) {
     return <main className="auth-shell"><section className="auth-panel"><p>正在恢复会话...</p></section></main>;
@@ -519,7 +524,7 @@ export function App() {
     return activeFile ? (
       <main className="reader-route-shell">
         <Suspense fallback={<section className="reader-placeholder"><p>正在加载阅读器...</p></section>}>
-          <PdfReader token={accessToken} file={activeFile} syncPulse={syncPulse} />
+          <PdfReader token={accessToken} userKey={offlineUserKey} file={activeFile} syncPulse={syncPulse} />
         </Suspense>
       </main>
     ) : (
@@ -1096,6 +1101,10 @@ function getPageTitle(pathname: string) {
   if (pathname === "/trash") return "回收站";
   if (pathname === "/settings") return "设置";
   return "我的文档";
+}
+
+function buildSyncCursor(createdAt: string, id: string) {
+  return btoa(JSON.stringify({ createdAt, id })).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function EmptyLibrary({ onUpload }: { onUpload: () => void }) {

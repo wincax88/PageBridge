@@ -34,6 +34,7 @@ type MobileReaderPanel = "nav" | "search" | "annotations" | null;
 
 interface PdfReaderProps {
   token: string;
+  userKey: string;
   file: FileRecord | null;
   syncPulse: number;
 }
@@ -102,7 +103,7 @@ interface DeletedAnnotationSnapshot {
   expiresAt: number;
 }
 
-export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
+export default function PdfReader({ token, userKey, file, syncPulse }: PdfReaderProps) {
   const navigate = useNavigate();
   const readerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -196,10 +197,10 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   async function loadPdfData(fileId: string) {
     try {
       const data = await downloadPdf(token, fileId);
-      await offlineDb.pdfFiles.put({ fileId, data: data.slice(0), updatedAt: new Date().toISOString() });
+      await offlineDb.pdfFiles.put({ userKey, fileId, data: data.slice(0), updatedAt: new Date().toISOString() });
       return data;
     } catch (err) {
-      const cached = await offlineDb.pdfFiles.get(fileId);
+      const cached = await offlineDb.pdfFiles.get([userKey, fileId]);
       if (cached) return cached.data.slice(0);
       throw err;
     }
@@ -225,7 +226,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
         await cacheAnnotations(file.id, records);
         if (!cancelled) setAnnotations(records);
       } catch {
-        const cached = await offlineDb.annotationLists.get(file.id);
+        const cached = await offlineDb.annotationLists.get([userKey, file.id]);
         if (!cancelled && cached) {
           setAnnotations(cached.annotations as AnnotationRecord[]);
           setAnnotationStatus("queued");
@@ -242,7 +243,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   }, [file, syncPulse, token]);
 
   async function cacheAnnotations(fileId: string, records: AnnotationRecord[]) {
-    await offlineDb.annotationLists.put({ fileId, annotations: records, updatedAt: new Date().toISOString() });
+    await offlineDb.annotationLists.put({ userKey, fileId, annotations: records, updatedAt: new Date().toISOString() });
   }
 
   function updateAnnotations(updater: (current: AnnotationRecord[]) => AnnotationRecord[]) {
@@ -418,6 +419,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   async function queuePendingReadingProgress(payload: PendingReadingProgressPayload) {
     await removePendingReadingProgress(payload.fileId);
     await offlineDb.pendingChanges.add({
+      userKey,
       entityType: "reading_progress",
       entityId: payload.fileId,
       operation: "update",
@@ -428,8 +430,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
   async function removePendingReadingProgress(fileId: string) {
     const pending = await offlineDb.pendingChanges
-      .where("entityType")
-      .equals("reading_progress")
+      .where("[userKey+entityType]")
+      .equals([userKey, "reading_progress"])
       .and((change) => change.entityId === fileId)
       .toArray();
     await Promise.all(pending.map((change) => (change.id === undefined ? Promise.resolve() : offlineDb.pendingChanges.delete(change.id))));
@@ -439,8 +441,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     if (!navigator.onLine) return;
 
     const pending = await offlineDb.pendingChanges
-      .where("entityType")
-      .equals("reading_progress")
+      .where("[userKey+entityType]")
+      .equals([userKey, "reading_progress"])
       .toArray();
     if (!pending.length) return;
 
@@ -531,6 +533,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     input: PendingNotePayload["input"] | PendingHighlightPayload["input"]
   ) {
     await offlineDb.pendingChanges.add({
+      userKey,
       entityType: "annotation",
       entityId: localId,
       operation: "create",
@@ -567,6 +570,7 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
     await removePendingAnnotationChanges(annotationId, ["update"]);
     await offlineDb.pendingChanges.add({
+      userKey,
       entityType: "annotation",
       entityId: annotationId,
       operation: "update",
@@ -582,10 +586,16 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     if (!file) return;
 
     if (await hasPendingAnnotationCreate(annotationId)) {
-      await offlineDb.pendingChanges.where("entityId").equals(annotationId).delete();
+      const pendingCreate = await offlineDb.pendingChanges
+        .where("[userKey+entityId]")
+        .equals([userKey, annotationId])
+        .and((change) => change.entityType === "annotation" && change.operation === "create")
+        .toArray();
+      await Promise.all(pendingCreate.map((change) => (change.id === undefined ? Promise.resolve() : offlineDb.pendingChanges.delete(change.id))));
     } else {
       await removePendingAnnotationChanges(annotationId, ["update", "delete"]);
       await offlineDb.pendingChanges.add({
+        userKey,
         entityType: "annotation",
         entityId: annotationId,
         operation: "delete",
@@ -600,8 +610,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
   async function hasPendingAnnotationCreate(annotationId: string) {
     const pendingCreate = await offlineDb.pendingChanges
-      .where("entityId")
-      .equals(annotationId)
+      .where("[userKey+entityId]")
+      .equals([userKey, annotationId])
       .and((change) => change.entityType === "annotation" && change.operation === "create")
       .first();
     return Boolean(pendingCreate);
@@ -609,8 +619,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
 
   async function removePendingAnnotationChanges(annotationId: string, operations: Array<"update" | "delete">) {
     const pending = await offlineDb.pendingChanges
-      .where("entityType")
-      .equals("annotation")
+      .where("[userKey+entityType]")
+      .equals([userKey, "annotation"])
       .and((change) => change.entityId === annotationId && operations.includes(change.operation as "update" | "delete"))
       .toArray();
     await Promise.all(pending.map((change) => (change.id === undefined ? Promise.resolve() : offlineDb.pendingChanges.delete(change.id))));
@@ -619,8 +629,10 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
   async function replayPendingAnnotationChanges() {
     if (!navigator.onLine) return;
 
-    const pendingChanges = await offlineDb.pendingChanges.toArray();
-    const pendingAnnotations = pendingChanges.filter((change) => change.entityType === "annotation").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const pendingAnnotations = (await offlineDb.pendingChanges
+      .where("[userKey+entityType]")
+      .equals([userKey, "annotation"])
+      .toArray()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (!pendingAnnotations.length) return;
 
     setAnnotationStatus("saving");
@@ -665,8 +677,8 @@ export default function PdfReader({ token, file, syncPulse }: PdfReaderProps) {
     if (!localId.startsWith("offline-")) return;
 
     const pending = await offlineDb.pendingChanges
-      .where("entityType")
-      .equals("annotation")
+      .where("[userKey+entityType]")
+      .equals([userKey, "annotation"])
       .and((change) => change.entityId === localId && change.id !== excludeChangeId)
       .toArray();
 

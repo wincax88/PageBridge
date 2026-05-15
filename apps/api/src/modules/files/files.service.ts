@@ -120,16 +120,18 @@ export class FilesService {
     const expectedStorageKey = this.storage.buildUserFileKey(userId, input.fileId);
     if (!input.fileId || input.storageKey !== expectedStorageKey) throw new BadRequestException("Upload target is invalid");
     await this.ensureUploadedObject(input.storageKey, input.sizeBytes);
-    const existingFile = await this.prisma.file.findFirst({ where: { id: input.fileId, userId } });
-    if (existingFile) {
-      if (existingFile.storageKey !== input.storageKey || existingFile.sizeBytes !== BigInt(input.sizeBytes)) throw new BadRequestException("Upload target is invalid");
-      return { ...existingFile, sizeBytes: existingFile.sizeBytes.toString() };
-    }
-    await this.ensureFileCountQuota(userId);
-    await this.ensureStorageQuota(userId, input.sizeBytes);
-
-    const result = await this.createCompletedUpload(userId, input.fileId, name, input.sizeBytes, input.storageKey);
-    if (result.created) await this.recordChange(userId, result.file.id, "create", result.file.id, { name: result.file.name, sizeBytes: result.file.sizeBytes.toString() });
+    const result = await this.prisma.$transaction(async (tx) => {
+      const existingFile = await tx.file.findFirst({ where: { id: input.fileId, userId } });
+      if (existingFile) {
+        if (existingFile.storageKey !== input.storageKey || existingFile.sizeBytes !== BigInt(input.sizeBytes)) throw new BadRequestException("Upload target is invalid");
+        return { file: existingFile, created: false };
+      }
+      await this.ensureFileCountQuota(userId, tx);
+      await this.ensureStorageQuota(userId, input.sizeBytes, tx);
+      const completed = await this.createCompletedUpload(userId, input.fileId, name, input.sizeBytes, input.storageKey, tx);
+      if (completed.created) await this.recordChange(userId, completed.file.id, "create", completed.file.id, { name: completed.file.name, sizeBytes: completed.file.sizeBytes.toString() }, tx);
+      return completed;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return { ...result.file, sizeBytes: result.file.sizeBytes.toString() };
   }
 
@@ -170,11 +172,14 @@ export class FilesService {
   }
 
   async restore(userId: string, fileId: string) {
-    const deletedFile = await this.ensureDeletedFile(userId, fileId);
-    await this.ensureFileCountQuota(userId);
-    await this.ensureStorageQuota(userId, Number(deletedFile.sizeBytes));
-    const file = await this.prisma.file.update({ where: { id: fileId }, data: { deletedAt: null } });
-    await this.recordChange(userId, fileId, "update", fileId, { deletedAt: null });
+    const file = await this.prisma.$transaction(async (tx) => {
+      const deletedFile = await this.ensureDeletedFile(userId, fileId, tx);
+      await this.ensureFileCountQuota(userId, tx);
+      await this.ensureStorageQuota(userId, Number(deletedFile.sizeBytes), tx);
+      const restored = await tx.file.update({ where: { id: fileId }, data: { deletedAt: null } });
+      await this.recordChange(userId, fileId, "update", fileId, { deletedAt: null }, tx);
+      return restored;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
@@ -197,8 +202,8 @@ export class FilesService {
     return { ok: true, deletedCount: deletedFiles.length };
   }
 
-  private async recordChange(userId: string, fileId: string, operation: "create" | "update" | "delete", entityId: string, payload: unknown) {
-    await this.prisma.syncChange.create({
+  private async recordChange(userId: string, fileId: string, operation: "create" | "update" | "delete", entityId: string, payload: unknown, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+    await db.syncChange.create({
       data: {
         userId,
         fileId,
@@ -217,8 +222,8 @@ export class FilesService {
     return file;
   }
 
-  private async ensureDeletedFile(userId: string, fileId: string) {
-    const file = await this.prisma.file.findFirst({ where: { id: fileId, userId, deletedAt: { not: null } } });
+  private async ensureDeletedFile(userId: string, fileId: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const file = await db.file.findFirst({ where: { id: fileId, userId, deletedAt: { not: null } } });
     if (!file) throw new NotFoundException("Deleted file not found");
     return file;
   }
@@ -246,8 +251,8 @@ export class FilesService {
     }
   }
 
-  private async ensureStorageQuota(userId: string, incomingBytes: number) {
-    const aggregate = await this.prisma.file.aggregate({
+  private async ensureStorageQuota(userId: string, incomingBytes: number, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const aggregate = await db.file.aggregate({
       where: { userId, deletedAt: null },
       _sum: { sizeBytes: true }
     });
@@ -258,9 +263,9 @@ export class FilesService {
     }
   }
 
-  private async createCompletedUpload(userId: string, fileId: string, name: string, sizeBytes: number, storageKey: string) {
+  private async createCompletedUpload(userId: string, fileId: string, name: string, sizeBytes: number, storageKey: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
     try {
-      const file = await this.prisma.file.create({
+      const file = await db.file.create({
         data: {
           id: fileId,
           userId,
@@ -274,14 +279,14 @@ export class FilesService {
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
 
-      const existingFile = await this.prisma.file.findFirst({ where: { id: fileId, userId } });
+      const existingFile = await db.file.findFirst({ where: { id: fileId, userId } });
       if (!existingFile || existingFile.storageKey !== storageKey || existingFile.sizeBytes !== BigInt(sizeBytes)) throw new BadRequestException("Upload target is invalid");
       return { file: existingFile, created: false };
     }
   }
 
-  private async ensureFileCountQuota(userId: string) {
-    const count = await this.prisma.file.count({ where: { userId, deletedAt: null } });
+  private async ensureFileCountQuota(userId: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const count = await db.file.count({ where: { userId, deletedAt: null } });
     if (count >= FREE_USER_FILE_COUNT_QUOTA) {
       throw new BadRequestException("File count quota exceeded");
     }

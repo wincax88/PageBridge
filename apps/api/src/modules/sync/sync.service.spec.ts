@@ -25,11 +25,11 @@ describe("SyncService.state", () => {
 
     await expect(service.state("user-1")).resolves.toEqual({
       latestChangeId: "change-1",
-      cursor: "2026-05-10T12:00:00.000Z"
+      cursor: Buffer.from(JSON.stringify({ createdAt: "2026-05-10T12:00:00.000Z", id: "change-1" }), "utf8").toString("base64url")
     });
     expect(prisma.syncChange.findFirst).toHaveBeenCalledWith({
       where: { userId: "user-1" },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: { id: true, createdAt: true }
     });
   });
@@ -39,7 +39,7 @@ describe("SyncService.state", () => {
 
     await expect(service.state("user-1")).resolves.toEqual({
       latestChangeId: null,
-      cursor: "1970-01-01T00:00:00.000Z"
+      cursor: Buffer.from(JSON.stringify({ createdAt: "1970-01-01T00:00:00.000Z", id: "" }), "utf8").toString("base64url")
     });
   });
 });
@@ -50,6 +50,26 @@ describe("SyncService.changes", () => {
 
     expect(() => service.changes("user-1", "not-a-date")).toThrow(BadRequestException);
     expect(prisma.syncChange.findMany).not.toHaveBeenCalled();
+  });
+
+  it("uses a stable compound cursor to avoid skipping same-timestamp changes", () => {
+    const { service, prisma } = createService(null);
+    const cursor = Buffer.from(JSON.stringify({ createdAt: "2026-05-10T12:00:00.000Z", id: "change-1" }), "utf8").toString("base64url");
+
+    service.changes("user-1", cursor);
+
+    expect(prisma.syncChange.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: "user-1",
+        fileId: undefined,
+        OR: [
+          { createdAt: { gt: new Date("2026-05-10T12:00:00.000Z") } },
+          { createdAt: new Date("2026-05-10T12:00:00.000Z"), id: { gt: "change-1" } }
+        ]
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: 500
+    });
   });
 });
 

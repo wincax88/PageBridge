@@ -2,6 +2,7 @@ import Dexie, { type Table } from "dexie";
 
 export interface PendingChange {
   id?: number;
+  userKey: string;
   entityType: "file" | "annotation" | "reading_progress";
   entityId: string;
   operation: "create" | "update" | "delete";
@@ -10,12 +11,14 @@ export interface PendingChange {
 }
 
 export interface CachedPdfFile {
+  userKey: string;
   fileId: string;
   data: ArrayBuffer;
   updatedAt: string;
 }
 
 export interface CachedAnnotationList {
+  userKey: string;
   fileId: string;
   annotations: unknown[];
   updatedAt: string;
@@ -39,6 +42,11 @@ class PageBridgeDb extends Dexie {
       pendingChanges: "++id, entityType, entityId, createdAt",
       pdfFiles: "fileId, updatedAt",
       annotationLists: "fileId, updatedAt"
+    });
+    this.version(4).stores({
+      pendingChanges: "++id, userKey, [userKey+entityType], [userKey+entityId], createdAt",
+      pdfFiles: "[userKey+fileId], userKey, updatedAt",
+      annotationLists: "[userKey+fileId], userKey, updatedAt"
     });
   }
 }

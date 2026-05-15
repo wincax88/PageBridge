@@ -53,7 +53,8 @@ function createService(overrides: {
       update: vi.fn().mockResolvedValue({ ...deletedFile, deletedAt: null }),
       delete: vi.fn().mockResolvedValue(deletedFile)
     },
-    syncChange: { create: vi.fn().mockResolvedValue({}) }
+    syncChange: { create: vi.fn().mockResolvedValue({}) },
+    $transaction: vi.fn((callback) => callback(prisma))
   };
   const redis = { limit: vi.fn().mockResolvedValue(undefined) };
   const storage = {
