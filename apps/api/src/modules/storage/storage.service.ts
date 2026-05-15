@@ -12,17 +12,22 @@ export class StorageService {
   private readonly sseKmsKeyId?: string;
 
   constructor(config: ConfigService) {
-    this.bucket = config.get<string>("S3_BUCKET") ?? "pagebridge";
+    const isProduction = process.env.NODE_ENV === "production";
+    this.bucket = this.getRequiredStorageConfig(config, "S3_BUCKET", "pagebridge", isProduction);
+    const endpoint = config.get<string>("S3_ENDPOINT");
+    if (!endpoint && isProduction) {
+      throw new Error("S3_ENDPOINT must be configured in production");
+    }
     const serverSideEncryption = config.get<string>("S3_SERVER_SIDE_ENCRYPTION");
     this.serverSideEncryption = serverSideEncryption === "AES256" || serverSideEncryption === "aws:kms" ? serverSideEncryption : undefined;
     this.sseKmsKeyId = config.get<string>("S3_SSE_KMS_KEY_ID");
     const clientOptions = {
-      endpoint: config.get<string>("S3_ENDPOINT"),
+      endpoint,
       region: config.get<string>("S3_REGION") ?? "us-east-1",
       forcePathStyle: config.get<string>("S3_FORCE_PATH_STYLE") === "true",
       credentials: {
-        accessKeyId: config.get<string>("S3_ACCESS_KEY_ID") ?? "pagebridge",
-        secretAccessKey: config.get<string>("S3_SECRET_ACCESS_KEY") ?? "pagebridge-secret"
+        accessKeyId: this.getRequiredStorageConfig(config, "S3_ACCESS_KEY_ID", "pagebridge", isProduction),
+        secretAccessKey: this.getRequiredStorageConfig(config, "S3_SECRET_ACCESS_KEY", "pagebridge-secret", isProduction)
       }
     };
     this.client = new S3Client(clientOptions);
@@ -112,5 +117,13 @@ export class StorageService {
       ...(this.serverSideEncryption ? { ServerSideEncryption: this.serverSideEncryption } : {}),
       ...(this.serverSideEncryption === "aws:kms" && this.sseKmsKeyId ? { SSEKMSKeyId: this.sseKmsKeyId } : {})
     };
+  }
+
+  private getRequiredStorageConfig(config: ConfigService, key: string, fallback: string, isProduction: boolean) {
+    const value = config.get<string>(key);
+    if (!value && isProduction) {
+      throw new Error(`${key} must be configured in production`);
+    }
+    return value ?? fallback;
   }
 }

@@ -455,7 +455,7 @@ export function App() {
   const readerMatch = matchPath("/reader/:fileId", location.pathname);
   const routeFileId = readerMatch?.params.fileId;
   const routeSelectedFile = routeFileId ? files.find((file) => file.id === routeFileId) ?? null : null;
-  const activeFile = routeSelectedFile ?? selectedFile;
+  const activeFile = routeFileId ? routeSelectedFile : selectedFile;
   const filteredFiles = fileSearch.trim()
     ? files.filter((file) => file.name.toLowerCase().includes(fileSearch.trim().toLowerCase()))
     : files;
@@ -652,11 +652,11 @@ export function App() {
                   {effectiveDocumentView === "grid" ? (
                     <>
                       <span>{formatFileMeta(file)}</span>
-                      <span>最近阅读：第 1 页</span>
-                      <span>标注：0 条</span>
+                      <span>最近阅读：打开文档后同步</span>
+                      <span>标注：打开文档查看</span>
                     </>
                   ) : (
-                    <span>{formatFileMeta(file)} · 最近阅读：第 1 页 · 标注：0 条</span>
+                    <span>{formatFileMeta(file)} · 最近阅读：打开文档后同步 · 标注：打开文档查看</span>
                   )}
                 </div>
                 <div className="file-actions">
@@ -826,7 +826,7 @@ function SettingsPage({
         </article>
         <article className="mobile-storage-card">
           <span>存储空间</span>
-          <strong>238MB / 2GB</strong>
+          <strong>{formatBytes(used)} / {formatBytes(quota)}</strong>
           <div><span /></div>
         </article>
         <nav className="mobile-settings-list">
@@ -884,7 +884,7 @@ function SettingsPage({
                 <div className="storage-usage-bar"><span style={{ width: `${storagePercent}%` }} /></div>
                 <div className="storage-stats">
                   <span>文件数量<strong>{displayFileCount} 个</strong></span>
-                  <span>标注数量<strong>318 条</strong></span>
+                  <span>标注数量<strong>打开文档查看</strong></span>
                 </div>
               </div>
               <Button>升级存储空间</Button>
@@ -972,9 +972,9 @@ function MobileContinueCard({ file, onOpen }: { file: FileRecord; onOpen: () => 
   return (
     <article className="mobile-continue-card">
       <strong>{file.name}</strong>
-      <span>第 1 / {pageCount} 页</span>
+      <span>{pageCount > 1 ? `共 ${pageCount} 页` : "页数同步后显示"}</span>
       <span>上次阅读：{formatRelativeDate(file.updatedAt)}</span>
-      <span>标注 0 条</span>
+      <span>标注：打开文档查看</span>
       <Button onClick={onOpen}>继续阅读</Button>
     </article>
   );

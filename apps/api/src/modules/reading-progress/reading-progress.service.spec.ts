@@ -19,7 +19,8 @@ function createService() {
       findUnique: vi.fn().mockResolvedValue(currentProgress),
       upsert: vi.fn().mockResolvedValue(currentProgress)
     },
-    syncChange: { create: vi.fn().mockResolvedValue({}) }
+    syncChange: { create: vi.fn().mockResolvedValue({}) },
+    $transaction: vi.fn((callback) => callback(prisma))
   };
 
   return { service: new ReadingProgressService(prisma as never), prisma };

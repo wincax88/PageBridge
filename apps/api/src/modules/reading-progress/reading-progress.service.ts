@@ -40,34 +40,37 @@ export class ReadingProgressService {
       return current;
     }
 
-    const progress = await this.prisma.readingProgress.upsert({
-      where: { fileId_userId_deviceId: { fileId, userId, deviceId } },
-      create: {
-        fileId,
-        userId,
-        deviceId,
-        ...nextProgress
-      },
-      update: {
-        ...nextProgress
-      }
-    });
-    await this.prisma.syncChange.create({
-      data: {
-        userId,
-        fileId,
-        entityType: "reading_progress",
-        entityId: progress.id,
-        operation: "update",
-        clientRequestId: randomUUID(),
-        payload: {
+    const progress = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.readingProgress.upsert({
+        where: { fileId_userId_deviceId: { fileId, userId, deviceId } },
+        create: {
+          fileId,
+          userId,
           deviceId,
-          page: progress.page,
-          scrollOffset: progress.scrollOffset,
-          zoomMode: progress.zoomMode,
-          zoomValue: progress.zoomValue
+          ...nextProgress
+        },
+        update: {
+          ...nextProgress
         }
-      }
+      });
+      await tx.syncChange.create({
+        data: {
+          userId,
+          fileId,
+          entityType: "reading_progress",
+          entityId: saved.id,
+          operation: "update",
+          clientRequestId: randomUUID(),
+          payload: {
+            deviceId,
+            page: saved.page,
+            scrollOffset: saved.scrollOffset,
+            zoomMode: saved.zoomMode,
+            zoomValue: saved.zoomValue
+          }
+        }
+      });
+      return saved;
     });
     return progress;
   }

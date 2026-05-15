@@ -59,8 +59,11 @@ export class AnnotationsService {
     }
 
     const { clientRequestId: _clientRequestId, ...createInput } = input;
-    const annotation = await this.createAnnotationRecord(userId, fileId, createInput, input.clientRequestId);
-    await this.recordChange(userId, fileId, "create", annotation.id, annotation.version, annotation, input.clientRequestId);
+    const annotation = await this.prisma.$transaction(async (tx) => {
+      const created = await this.createAnnotationRecord(userId, fileId, createInput, input.clientRequestId, tx);
+      await this.recordChange(userId, fileId, "create", created.id, created.version, created, input.clientRequestId, tx);
+      return created;
+    });
     return annotation;
   }
 
@@ -71,21 +74,27 @@ export class AnnotationsService {
       throw new ConflictException("Annotation has changed on another device");
     }
     const { baseVersion: _baseVersion, clientRequestId: _clientRequestId, ...updateInput } = input;
-    const annotation = await this.prisma.annotation.update({
-      where: { id: annotationId },
-      data: { ...updateInput, version: { increment: 1 } } as never
+    const annotation = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.annotation.update({
+        where: { id: annotationId },
+        data: { ...updateInput, version: { increment: 1 } } as never
+      });
+      await this.recordChange(userId, fileId, "update", updated.id, updated.version, updateInput, undefined, tx);
+      return updated;
     });
-    await this.recordChange(userId, fileId, "update", annotation.id, annotation.version, updateInput);
     return annotation;
   }
 
   async softDelete(userId: string, fileId: string, annotationId: string) {
     await this.ensureAnnotation(userId, fileId, annotationId);
-    const annotation = await this.prisma.annotation.update({
-      where: { id: annotationId },
-      data: { deletedAt: new Date(), version: { increment: 1 } }
+    const annotation = await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.annotation.update({
+        where: { id: annotationId },
+        data: { deletedAt: new Date(), version: { increment: 1 } }
+      });
+      await this.recordChange(userId, fileId, "delete", deleted.id, deleted.version, { deletedAt: deleted.deletedAt?.toISOString() }, undefined, tx);
+      return deleted;
     });
-    await this.recordChange(userId, fileId, "delete", annotation.id, annotation.version, { deletedAt: annotation.deletedAt?.toISOString() });
     return annotation;
   }
 
@@ -96,10 +105,11 @@ export class AnnotationsService {
     entityId: string,
     nextVersion: number,
     payload: unknown,
-    clientRequestId: string = randomUUID()
+    clientRequestId: string = randomUUID(),
+    db: Prisma.TransactionClient | PrismaService = this.prisma
   ) {
     try {
-      await this.prisma.syncChange.create({
+      await db.syncChange.create({
         data: {
           userId,
           fileId,
@@ -114,16 +124,16 @@ export class AnnotationsService {
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
 
-      const existingChange = await this.prisma.syncChange.findUnique({ where: { userId_clientRequestId: { userId, clientRequestId } } });
+      const existingChange = await db.syncChange.findUnique({ where: { userId_clientRequestId: { userId, clientRequestId } } });
       if (!existingChange || existingChange.entityType !== "annotation" || existingChange.operation !== operation || existingChange.fileId !== fileId || existingChange.entityId !== entityId) {
         throw new BadRequestException("Annotation request is invalid");
       }
     }
   }
 
-  private async createAnnotationRecord(userId: string, fileId: string, input: Omit<AnnotationInput, "clientRequestId">, clientRequestId?: string) {
+  private async createAnnotationRecord(userId: string, fileId: string, input: Omit<AnnotationInput, "clientRequestId">, clientRequestId?: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
     try {
-      return await this.prisma.annotation.create({
+      return await db.annotation.create({
         data: {
           ...(clientRequestId ? { id: clientRequestId } : {}),
           userId,
@@ -143,7 +153,7 @@ export class AnnotationsService {
       });
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002" || !clientRequestId) throw error;
-      const existingAnnotation = await this.prisma.annotation.findFirst({ where: { id: clientRequestId, userId, fileId } });
+      const existingAnnotation = await db.annotation.findFirst({ where: { id: clientRequestId, userId, fileId } });
       if (!existingAnnotation) throw new BadRequestException("Annotation request is invalid");
       return existingAnnotation;
     }

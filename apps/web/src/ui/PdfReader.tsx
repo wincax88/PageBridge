@@ -1152,7 +1152,7 @@ export default function PdfReader({ token, userKey, file, syncPulse }: PdfReader
                ) : <p className="helper-text empty-nav-text">该 PDF 暂无目录</p>}
             </div>
           ) : null}
-          {readerSideTab === "bookmarks" ? <div className="bookmark-list"><Bookmark size={18} /><p><strong>第 3 页：研究背景</strong><span>2026-05-08</span></p></div> : null}
+          {readerSideTab === "bookmarks" ? <div className="bookmark-list"><Bookmark size={18} /><p><strong>暂无书签</strong><span>书签功能接入后会显示在这里</span></p></div> : null}
         </div>
       ) : null}
       <div ref={canvasStageRef} className="canvas-stage">

@@ -133,7 +133,9 @@ async function performRefreshAccessToken() {
   }, undefined, true);
 
   if (!response.ok) {
-    useAuthStore.getState().clearSession();
+    if (response.status === 401 || response.status === 403) {
+      useAuthStore.getState().clearSession();
+    }
     return null;
   }
 

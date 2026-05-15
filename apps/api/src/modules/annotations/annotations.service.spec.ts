@@ -27,7 +27,8 @@ function createService() {
     syncChange: {
       create: vi.fn().mockResolvedValue({}),
       findUnique: vi.fn().mockResolvedValue(null)
-    }
+    },
+    $transaction: vi.fn((callback) => callback(prisma))
   };
 
   return {

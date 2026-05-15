@@ -155,8 +155,11 @@ export class FilesService {
     const current = await this.ensureFile(userId, fileId);
     if (current.name === normalizedName) return { ...current, sizeBytes: current.sizeBytes.toString() };
 
-    const file = await this.prisma.file.update({ where: { id: fileId }, data: { name: normalizedName } });
-    await this.recordChange(userId, fileId, "update", fileId, { name: normalizedName });
+    const file = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.file.update({ where: { id: fileId }, data: { name: normalizedName } });
+      await this.recordChange(userId, fileId, "update", fileId, { name: normalizedName }, tx);
+      return updated;
+    });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
@@ -166,8 +169,11 @@ export class FilesService {
     const current = await this.ensureFile(userId, fileId);
     if (current.pageCount === pageCount) return { ...current, sizeBytes: current.sizeBytes.toString() };
 
-    const file = await this.prisma.file.update({ where: { id: fileId }, data: { pageCount } });
-    await this.recordChange(userId, fileId, "update", fileId, { pageCount });
+    const file = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.file.update({ where: { id: fileId }, data: { pageCount } });
+      await this.recordChange(userId, fileId, "update", fileId, { pageCount }, tx);
+      return updated;
+    });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
@@ -176,8 +182,11 @@ export class FilesService {
     if (!current) throw new NotFoundException("File not found");
     if (current.deletedAt) return { ...current, sizeBytes: current.sizeBytes.toString() };
 
-    const file = await this.prisma.file.update({ where: { id: fileId }, data: { deletedAt: new Date() } });
-    await this.recordChange(userId, fileId, "delete", fileId, { deletedAt: file.deletedAt?.toISOString() });
+    const file = await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.file.update({ where: { id: fileId }, data: { deletedAt: new Date() } });
+      await this.recordChange(userId, fileId, "delete", fileId, { deletedAt: deleted.deletedAt?.toISOString() }, tx);
+      return deleted;
+    });
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
@@ -354,8 +363,17 @@ export class FilesService {
   }
 
   private async deleteStoredFile(fileId: string, storageKey: string) {
-    await this.deleteObjectBestEffort(storageKey);
+    await this.deleteObjectAllowMissing(storageKey);
     await this.prisma.file.delete({ where: { id: fileId } });
+  }
+
+  private async deleteObjectAllowMissing(storageKey: string) {
+    try {
+      await this.storage.deleteObject(storageKey);
+    } catch (error) {
+      if (this.isObjectNotFoundError(error)) return;
+      throw error;
+    }
   }
 
   private async deleteObjectBestEffort(storageKey: string) {
@@ -381,5 +399,11 @@ export class FilesService {
 
   private isSerializationConflict(error: unknown) {
     return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
+  }
+
+  private isObjectNotFoundError(error: unknown) {
+    if (!error || typeof error !== "object") return false;
+    const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: number } };
+    return candidate.name === "NoSuchKey" || candidate.name === "NotFound" || candidate.$metadata?.httpStatusCode === 404;
   }
 }

@@ -222,7 +222,9 @@ describe("FilesService trash operations", () => {
   });
 
   it("deletes the database row even when the stored object is already missing", async () => {
-    const deleteObject = vi.fn().mockRejectedValue(new Error("missing object"));
+    const missingObjectError = new Error("missing object");
+    missingObjectError.name = "NoSuchKey";
+    const deleteObject = vi.fn().mockRejectedValue(missingObjectError);
     const { service, prisma, storage } = createService({ deleteObject });
 
     await expect(service.permanentlyDelete("user-1", "file-1")).resolves.toEqual({ ok: true });
