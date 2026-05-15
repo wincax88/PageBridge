@@ -93,72 +93,17 @@ describe("SyncService.changes", () => {
 });
 
 describe("SyncService.submit", () => {
-  it("scopes idempotency to the current user", async () => {
+  it("rejects direct sync submissions", async () => {
     const { service, prisma } = createService(null);
 
-    await service.submit("user-1", {
+    await expect(service.submit("user-1", {
       entityType: "file",
       entityId: "file-1",
       operation: "update",
       clientRequestId: "request-1"
-    });
-
-    expect(prisma.syncChange.findUnique).toHaveBeenCalledWith({ where: { userId_clientRequestId: { userId: "user-1", clientRequestId: "request-1" } } });
-    expect(prisma.file.findFirst).toHaveBeenCalledWith({ where: { id: "file-1", userId: "user-1" }, select: { id: true } });
-  });
-
-  it("rejects changes for files outside the current user", async () => {
-    const { service, prisma } = createService(null);
-    prisma.file.findFirst.mockResolvedValue(null);
-
-    await expect(service.submit("user-1", {
-      fileId: "file-2",
-      entityType: "file",
-      entityId: "file-2",
-      operation: "update",
-      clientRequestId: "request-2"
     })).rejects.toBeInstanceOf(BadRequestException);
+
     expect(prisma.syncChange.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects oversized payloads", async () => {
-    const { service, prisma } = createService(null);
-
-    await expect(service.submit("user-1", {
-      fileId: "file-1",
-      entityType: "annotation",
-      entityId: "annotation-1",
-      operation: "update",
-      clientRequestId: "request-3",
-      payload: { value: "x".repeat(17 * 1024) }
-    })).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.syncChange.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects direct create submissions", async () => {
-    const { service, prisma } = createService(null);
-
-    await expect(service.submit("user-1", {
-      fileId: "file-1",
-      entityType: "annotation",
-      entityId: "annotation-1",
-      operation: "create",
-      clientRequestId: "request-4"
-    })).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.syncChange.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects changes for annotations outside the current file", async () => {
-    const { service, prisma } = createService(null);
-    prisma.annotation.findFirst.mockResolvedValue(null);
-
-    await expect(service.submit("user-1", {
-      fileId: "file-1",
-      entityType: "annotation",
-      entityId: "annotation-2",
-      operation: "update",
-      clientRequestId: "request-5"
-    })).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.syncChange.create).not.toHaveBeenCalled();
+    expect(prisma.syncChange.findUnique).not.toHaveBeenCalled();
   });
 });

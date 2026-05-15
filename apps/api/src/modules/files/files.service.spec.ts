@@ -104,6 +104,21 @@ describe("FilesService.upload", () => {
     expect(storage.putPdf).not.toHaveBeenCalled();
     expect(prisma.file.create).not.toHaveBeenCalled();
   });
+
+  it("removes uploaded objects when database creation fails", async () => {
+    const { service, prisma, storage } = createService({ fileCount: 500 });
+
+    await expect(service.upload("user-1", {
+      originalname: "paper.pdf",
+      mimetype: "application/pdf",
+      size: 1234,
+      buffer: Buffer.from("%PDF-file")
+    } as Express.Multer.File)).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(storage.putPdf).toHaveBeenCalled();
+    expect(storage.deleteObject).toHaveBeenCalled();
+    expect(prisma.file.create).not.toHaveBeenCalled();
+  });
 });
 
 describe("FilesService.completeUpload", () => {

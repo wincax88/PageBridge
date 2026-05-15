@@ -22,9 +22,6 @@ interface SyncCursor {
   id?: string;
 }
 
-const MAX_SYNC_PAYLOAD_BYTES = 16 * 1024;
-const MAX_SYNC_ID_LENGTH = 200;
-
 @Injectable()
 export class SyncService {
   constructor(
@@ -68,28 +65,9 @@ export class SyncService {
     };
   }
 
-  async submit(userId: string, input: SubmitChangeInput) {
+  async submit(userId: string, _input: SubmitChangeInput) {
     await this.redis.limit(`rate:sync:submit:${userId}`, 600, 60);
-    this.validateSubmitInput(input);
-    const existing = await this.prisma.syncChange.findUnique({ where: { userId_clientRequestId: { userId, clientRequestId: input.clientRequestId } } });
-    if (existing) return this.serializeChange(existing);
-
-    await this.ensureSubmittedEntity(userId, input);
-
-    const change = await this.prisma.syncChange.create({
-      data: {
-        userId,
-        fileId: input.fileId,
-        entityType: input.entityType,
-        entityId: input.entityId,
-        operation: input.operation,
-        baseVersion: input.baseVersion,
-        nextVersion: input.nextVersion,
-        clientRequestId: input.clientRequestId,
-        payload: input.payload as never
-      }
-    });
-    return this.serializeChange(change);
+    throw new BadRequestException("Direct sync submissions are not supported");
   }
 
   private encodeCursor(createdAt: Date, id: string, sequence: bigint) {
@@ -109,43 +87,6 @@ export class SyncService {
       if (Number.isNaN(createdAt.getTime())) throw new BadRequestException("Sync cursor is invalid");
       return { createdAt };
     }
-  }
-
-  private validateSubmitInput(input: SubmitChangeInput) {
-    this.validateIdentifier(input.entityId, "Entity id");
-    this.validateIdentifier(input.clientRequestId, "Client request id");
-    if (input.fileId !== undefined) this.validateIdentifier(input.fileId, "File id");
-    if (input.entityType !== "file" && !input.fileId) throw new BadRequestException("File id is required");
-    if (input.operation === "create") throw new BadRequestException("Direct sync creation is not supported");
-    if (input.entityType === "reading_progress" && input.operation !== "update") throw new BadRequestException("Reading progress changes must be updates");
-    if (input.baseVersion !== undefined && input.baseVersion < 1) throw new BadRequestException("Base version is invalid");
-    if (input.nextVersion !== undefined && input.nextVersion < 1) throw new BadRequestException("Next version is invalid");
-    if (input.payload !== undefined) {
-      const payload = JSON.stringify(input.payload);
-      if (payload === undefined || Buffer.byteLength(payload, "utf8") > MAX_SYNC_PAYLOAD_BYTES) throw new BadRequestException("Sync payload is invalid");
-    }
-  }
-
-  private validateIdentifier(value: string, label: string) {
-    if (!value?.trim() || value.length > MAX_SYNC_ID_LENGTH) throw new BadRequestException(`${label} is invalid`);
-  }
-
-  private async ensureSubmittedEntity(userId: string, input: SubmitChangeInput) {
-    if (input.entityType === "file") {
-      if (input.fileId && input.fileId !== input.entityId) throw new BadRequestException("File id is invalid");
-      const file = await this.prisma.file.findFirst({ where: { id: input.entityId, userId }, select: { id: true } });
-      if (!file) throw new BadRequestException("File is invalid");
-      return;
-    }
-
-    if (input.entityType === "annotation") {
-      const annotation = await this.prisma.annotation.findFirst({ where: { id: input.entityId, userId, fileId: input.fileId }, select: { id: true } });
-      if (!annotation) throw new BadRequestException("Annotation is invalid");
-      return;
-    }
-
-    const progress = await this.prisma.readingProgress.findFirst({ where: { id: input.entityId, userId, fileId: input.fileId }, select: { id: true } });
-    if (!progress) throw new BadRequestException("Reading progress is invalid");
   }
 
   private serializeChange<T extends { sequence: bigint }>(change: T) {

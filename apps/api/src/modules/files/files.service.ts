@@ -78,24 +78,29 @@ export class FilesService {
     const storageKey = this.storage.buildUserFileKey(userId, fileId);
     await this.storage.putPdf(storageKey, file.buffer, file.mimetype);
 
-    const created = await this.runSerializableTransaction(async (tx) => {
-      await this.ensureFileCountQuota(userId, tx);
-      await this.ensureStorageQuota(userId, file.size, tx);
-      const uploaded = await tx.file.create({
-        data: {
-          id: fileId,
-          userId,
-          name,
-          sizeBytes: BigInt(file.size),
-          mimeType: file.mimetype,
-          storageKey
-        }
+    try {
+      const created = await this.runSerializableTransaction(async (tx) => {
+        await this.ensureFileCountQuota(userId, tx);
+        await this.ensureStorageQuota(userId, file.size, tx);
+        const uploaded = await tx.file.create({
+          data: {
+            id: fileId,
+            userId,
+            name,
+            sizeBytes: BigInt(file.size),
+            mimeType: file.mimetype,
+            storageKey
+          }
+        });
+        await this.recordChange(userId, uploaded.id, "create", uploaded.id, { name: uploaded.name, sizeBytes: uploaded.sizeBytes.toString() }, tx);
+        return uploaded;
       });
-      await this.recordChange(userId, uploaded.id, "create", uploaded.id, { name: uploaded.name, sizeBytes: uploaded.sizeBytes.toString() }, tx);
-      return uploaded;
-    });
 
-    return { ...created, sizeBytes: created.sizeBytes.toString() };
+      return { ...created, sizeBytes: created.sizeBytes.toString() };
+    } catch (error) {
+      await this.deleteObjectBestEffort(storageKey);
+      throw error;
+    }
   }
 
   async createUploadTarget(userId: string, name: string, sizeBytes: number) {
@@ -349,12 +354,16 @@ export class FilesService {
   }
 
   private async deleteStoredFile(fileId: string, storageKey: string) {
+    await this.deleteObjectBestEffort(storageKey);
+    await this.prisma.file.delete({ where: { id: fileId } });
+  }
+
+  private async deleteObjectBestEffort(storageKey: string) {
     try {
       await this.storage.deleteObject(storageKey);
     } catch {
       // The database is the source of truth for retention; missing objects should not block cleanup.
     }
-    await this.prisma.file.delete({ where: { id: fileId } });
   }
 
   private async runSerializableTransaction<T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) {
