@@ -640,27 +640,34 @@ export default function PdfReader({ token, userKey, file, syncPulse }: PdfReader
     const annotationIdMap = new Map<string, string>();
     try {
       for (const change of pendingAnnotations) {
-        if (change.operation === "create") {
-          const payload = change.payload as (PendingNotePayload & { type?: "text_note" }) | (PendingHighlightPayload & { type: "highlight" });
-          let created: AnnotationRecord;
-          if (payload.type === "highlight") {
-            created = await createHighlightAnnotation(token, payload.fileId, { ...(payload.input as PendingHighlightPayload["input"]), clientRequestId: change.entityId });
-          } else {
-            created = await createTextNoteAnnotation(token, payload.fileId, { ...(payload.input as PendingNotePayload["input"]), clientRequestId: change.entityId });
+        try {
+          if (change.operation === "create") {
+            const payload = change.payload as (PendingNotePayload & { type?: "text_note" }) | (PendingHighlightPayload & { type: "highlight" });
+            let created: AnnotationRecord;
+            if (payload.type === "highlight") {
+              created = await createHighlightAnnotation(token, payload.fileId, { ...(payload.input as PendingHighlightPayload["input"]), clientRequestId: change.entityId });
+            } else {
+              created = await createTextNoteAnnotation(token, payload.fileId, { ...(payload.input as PendingNotePayload["input"]), clientRequestId: change.entityId });
+            }
+            annotationIdMap.set(change.entityId, created.id);
+            await replacePendingAnnotationId(change.entityId, created.id, change.id);
+            if (payload.fileId === file?.id) replayedCurrentFile = true;
+          } else if (change.operation === "update") {
+            const payload = change.payload as PendingAnnotationUpdatePayload;
+            await updateAnnotation(token, payload.fileId, annotationIdMap.get(payload.annotationId) ?? payload.annotationId, payload.input);
+            if (payload.fileId === file?.id) replayedCurrentFile = true;
+          } else if (change.operation === "delete") {
+            const payload = change.payload as PendingAnnotationDeletePayload;
+            await deleteAnnotation(token, payload.fileId, annotationIdMap.get(payload.annotationId) ?? payload.annotationId);
+            if (payload.fileId === file?.id) replayedCurrentFile = true;
           }
-          annotationIdMap.set(change.entityId, created.id);
-          await replacePendingAnnotationId(change.entityId, created.id, change.id);
-          if (payload.fileId === file?.id) replayedCurrentFile = true;
-        } else if (change.operation === "update") {
-          const payload = change.payload as PendingAnnotationUpdatePayload;
-          await updateAnnotation(token, payload.fileId, annotationIdMap.get(payload.annotationId) ?? payload.annotationId, payload.input);
-          if (payload.fileId === file?.id) replayedCurrentFile = true;
-        } else if (change.operation === "delete") {
-          const payload = change.payload as PendingAnnotationDeletePayload;
-          await deleteAnnotation(token, payload.fileId, annotationIdMap.get(payload.annotationId) ?? payload.annotationId);
+          if (change.id !== undefined) await offlineDb.pendingChanges.delete(change.id);
+        } catch (err) {
+          if (!isNonRetryableAnnotationReplayError(err)) throw err;
+          if (change.id !== undefined) await offlineDb.pendingChanges.delete(change.id);
+          const payload = change.payload as Partial<PendingNotePayload & PendingHighlightPayload & PendingAnnotationUpdatePayload & PendingAnnotationDeletePayload>;
           if (payload.fileId === file?.id) replayedCurrentFile = true;
         }
-        if (change.id !== undefined) await offlineDb.pendingChanges.delete(change.id);
       }
       if (replayedCurrentFile && file) {
         const records = await listAnnotations(token, file.id);
@@ -848,6 +855,10 @@ export default function PdfReader({ token, userKey, file, syncPulse }: PdfReader
 
     setAnnotationStatus("failed");
     setError(err instanceof Error ? err.message : fallbackMessage);
+  }
+
+  function isNonRetryableAnnotationReplayError(error: unknown) {
+    return error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
   }
 
   function jumpToPage() {

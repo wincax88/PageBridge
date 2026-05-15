@@ -1,20 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
-import { RedisService } from "../redis/redis.service";
-
-type ChangeEntityType = "file" | "annotation" | "reading_progress";
-type ChangeOperation = "create" | "update" | "delete";
-
-interface SubmitChangeInput {
-  fileId?: string;
-  entityType: ChangeEntityType;
-  entityId: string;
-  operation: ChangeOperation;
-  baseVersion?: number;
-  nextVersion?: number;
-  clientRequestId: string;
-  payload?: unknown;
-}
 
 interface SyncCursor {
   createdAt: Date;
@@ -24,10 +9,7 @@ interface SyncCursor {
 
 @Injectable()
 export class SyncService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   changes(userId: string, since?: string, fileId?: string) {
     const cursor = since ? this.parseCursor(since) : undefined;
@@ -63,11 +45,6 @@ export class SyncService {
       latestChangeId: latest?.id ?? null,
       cursor: latest ? this.encodeCursor(latest.createdAt, latest.id, latest.sequence) : this.encodeCursor(new Date(0), "", BigInt(0))
     };
-  }
-
-  async submit(userId: string, _input: SubmitChangeInput) {
-    await this.redis.limit(`rate:sync:submit:${userId}`, 600, 60);
-    throw new BadRequestException("Direct sync submissions are not supported");
   }
 
   private encodeCursor(createdAt: Date, id: string, sequence: bigint) {

@@ -20,8 +20,7 @@ function createService(latest: { id: string; createdAt: Date; sequence: bigint }
       findFirst: vi.fn().mockResolvedValue({ id: "progress-1" })
     }
   };
-  const redis = { limit: vi.fn().mockResolvedValue(undefined) };
-  return { service: new SyncService(prisma as never, redis as never), prisma };
+  return { service: new SyncService(prisma as never), prisma };
 }
 
 describe("SyncService.state", () => {
@@ -89,21 +88,5 @@ describe("SyncService.changes", () => {
       orderBy: { sequence: "asc" },
       take: 500
     });
-  });
-});
-
-describe("SyncService.submit", () => {
-  it("rejects direct sync submissions", async () => {
-    const { service, prisma } = createService(null);
-
-    await expect(service.submit("user-1", {
-      entityType: "file",
-      entityId: "file-1",
-      operation: "update",
-      clientRequestId: "request-1"
-    })).rejects.toBeInstanceOf(BadRequestException);
-
-    expect(prisma.syncChange.create).not.toHaveBeenCalled();
-    expect(prisma.syncChange.findUnique).not.toHaveBeenCalled();
   });
 });
