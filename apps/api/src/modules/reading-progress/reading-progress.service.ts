@@ -23,22 +23,33 @@ export class ReadingProgressService {
     await this.ensureFile(userId, fileId);
     this.validateProgressInput(input);
     const deviceId = input.deviceId ?? "web";
+    const nextProgress = {
+      page: input.page,
+      scrollOffset: input.scrollOffset ?? 0,
+      zoomMode: input.zoomMode ?? "fit_width",
+      zoomValue: input.zoomValue ?? null
+    };
+    const current = await this.prisma.readingProgress.findUnique({ where: { fileId_userId_deviceId: { fileId, userId, deviceId } } });
+    if (
+      current &&
+      current.page === nextProgress.page &&
+      current.scrollOffset === nextProgress.scrollOffset &&
+      current.zoomMode === nextProgress.zoomMode &&
+      current.zoomValue === nextProgress.zoomValue
+    ) {
+      return current;
+    }
+
     const progress = await this.prisma.readingProgress.upsert({
       where: { fileId_userId_deviceId: { fileId, userId, deviceId } },
       create: {
         fileId,
         userId,
         deviceId,
-        page: input.page,
-        scrollOffset: input.scrollOffset ?? 0,
-        zoomMode: input.zoomMode ?? "fit_width",
-        zoomValue: input.zoomValue
+        ...nextProgress
       },
       update: {
-        page: input.page,
-        scrollOffset: input.scrollOffset ?? 0,
-        zoomMode: input.zoomMode ?? "fit_width",
-        zoomValue: input.zoomValue
+        ...nextProgress
       }
     });
     await this.prisma.syncChange.create({
