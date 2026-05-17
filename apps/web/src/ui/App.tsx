@@ -61,6 +61,8 @@ export function App() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [documentView, setDocumentView] = useState<"grid" | "list">("grid");
   const [sessionRestored, setSessionRestored] = useState(false);
+  const [sessionRestoreError, setSessionRestoreError] = useState<string | null>(null);
+  const [sessionRestoreAttempt, setSessionRestoreAttempt] = useState(0);
 
   useEffect(() => {
     selectedFileRef.current = selectedFile;
@@ -71,14 +73,21 @@ export function App() {
 
     async function restoreSession() {
       if (accessToken) {
+        setSessionRestoreError(null);
         setSessionRestored(true);
         return;
       }
 
       try {
         await refreshAccessToken();
-      } finally {
-        if (!cancelled) setSessionRestored(true);
+        if (!cancelled) {
+          setSessionRestoreError(null);
+          setSessionRestored(true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSessionRestoreError(error instanceof Error ? error.message : "会话恢复失败，请重试。");
+        }
       }
     }
 
@@ -86,7 +95,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, sessionRestoreAttempt]);
 
   const filesQuery = useQuery({
     queryKey: ["files", accessToken],
@@ -470,7 +479,14 @@ export function App() {
   const offlineUserKey = userEmail ?? "anonymous";
 
   if (!sessionRestored) {
-    return <main className="auth-shell"><section className="auth-panel"><p>正在恢复会话...</p></section></main>;
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <p>{sessionRestoreError ?? "正在恢复会话..."}</p>
+          {sessionRestoreError ? <Button onClick={() => setSessionRestoreAttempt((attempt) => attempt + 1)}>重试</Button> : null}
+        </section>
+      </main>
+    );
   }
 
   if (!accessToken) {
@@ -802,11 +818,12 @@ function SettingsPage({
 }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("account");
   const initials = userEmail?.slice(0, 1).toUpperCase() || "A";
-  const used = Number(usedBytes ?? 238 * 1024 * 1024);
-  const quota = Number(quotaBytes ?? 2 * 1024 * 1024 * 1024);
+  const used = Number(usedBytes ?? 0);
+  const quota = Number(quotaBytes ?? 0);
   const storagePercent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0;
-  const displayFileCount = fileCount ?? 24;
-  const displayFileCountQuota = fileCountQuota ?? 100;
+  const displayFileCount = fileCount ?? 0;
+  const displayFileCountQuota = fileCountQuota ?? 0;
+  const accountLabel = userEmail ?? "未登录";
   const tabs: Array<{ id: SettingsTab; label: string; icon: typeof User }> = [
     { id: "account", label: "账号信息", icon: User },
     { id: "storage", label: "存储空间", icon: HardDrive },
@@ -822,7 +839,7 @@ function SettingsPage({
         <h1>我的</h1>
         <article className="mobile-profile-card">
           <div className="mobile-profile-avatar">{initials}</div>
-          <div><strong>用户昵称</strong><span>{userEmail || "user@email.com"}</span></div>
+          <div><strong>暂未设置昵称</strong><span>{accountLabel}</span></div>
         </article>
         <article className="mobile-storage-card">
           <span>存储空间</span>
@@ -868,8 +885,8 @@ function SettingsPage({
                 <div className="settings-avatar" aria-hidden="true">{initials}</div>
                 <Button variant="outline">更换头像</Button>
               </div>
-              <Label>昵称<Input value="用户名" readOnly /></Label>
-              <Label>邮箱<Input value={userEmail || "user@example.com"} readOnly /></Label>
+              <Label>昵称<Input value="暂未设置" readOnly /></Label>
+              <Label>邮箱<Input value={accountLabel} readOnly /></Label>
               <Button className="settings-outline-button" variant="outline">修改密码</Button>
               <div className="settings-divider" />
               <Button className="danger-outline-button" variant="outline" onClick={onLogout} disabled={logoutPending}><LogOut size={16} />退出登录</Button>

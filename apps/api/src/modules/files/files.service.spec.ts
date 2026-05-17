@@ -175,7 +175,7 @@ describe("FilesService.completeUpload", () => {
   });
 
   it("returns an existing completed upload when the client retries", async () => {
-    const { service, prisma } = createService({ existingFile: deletedFile });
+    const { service, prisma } = createService({ existingFile: { ...deletedFile, deletedAt: null } });
 
     const file = await service.completeUpload("user-1", {
       fileId: "file-1",
@@ -186,6 +186,19 @@ describe("FilesService.completeUpload", () => {
 
     expect(prisma.file.create).not.toHaveBeenCalled();
     expect(file.sizeBytes).toBe("1234");
+  });
+
+  it("rejects retries for upload targets that were deleted", async () => {
+    const { service, prisma } = createService({ existingFile: deletedFile });
+
+    await expect(service.completeUpload("user-1", {
+      fileId: "file-1",
+      name: "paper.pdf",
+      sizeBytes: 1234,
+      storageKey: "users/user-1/files/file-1.pdf"
+    })).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.file.create).not.toHaveBeenCalled();
   });
 
   it("retries serialization conflicts during completion", async () => {

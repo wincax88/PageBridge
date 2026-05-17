@@ -135,8 +135,9 @@ async function performRefreshAccessToken() {
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
       useAuthStore.getState().clearSession();
+      return null;
     }
-    return null;
+    throw new ApiError(`Refresh failed: ${response.status}`, response.status);
   }
 
   const session = (await response.json()) as AuthResponse;

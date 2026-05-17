@@ -133,6 +133,7 @@ export class FilesService {
     const result = await this.runSerializableTransaction(async (tx) => {
       const existingFile = await tx.file.findFirst({ where: { id: input.fileId, userId } });
       if (existingFile) {
+        if (existingFile.deletedAt) throw new BadRequestException("Upload target is invalid");
         if (existingFile.storageKey !== input.storageKey || existingFile.sizeBytes !== BigInt(input.sizeBytes)) throw new BadRequestException("Upload target is invalid");
         return { file: existingFile, created: false };
       }

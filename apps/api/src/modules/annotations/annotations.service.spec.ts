@@ -22,7 +22,8 @@ function createService() {
     annotation: {
       findFirst: vi.fn().mockResolvedValue(currentAnnotation),
       create: vi.fn().mockResolvedValue(currentAnnotation),
-      update: vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...currentAnnotation, ...data, version: currentAnnotation.version + 1 }))
+      update: vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...currentAnnotation, ...data, version: currentAnnotation.version + 1 })),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 })
     },
     syncChange: {
       create: vi.fn().mockResolvedValue({}),
@@ -50,11 +51,20 @@ describe("AnnotationsService.update", () => {
 
     const updated = await service.update("user-1", "file-1", "annotation-1", { note: "new note", baseVersion: 3 });
 
-    expect(prisma.annotation.update).toHaveBeenCalledWith({
-      where: { id: "annotation-1" },
+    expect(prisma.annotation.updateMany).toHaveBeenCalledWith({
+      where: { id: "annotation-1", userId: "user-1", fileId: "file-1", deletedAt: null, version: 3 },
       data: { note: "new note", version: { increment: 1 } }
     });
-    expect(updated.version).toBe(4);
+    expect(updated.version).toBe(3);
+  });
+
+  it("rejects concurrent edits that lose the atomic version check", async () => {
+    const { service, prisma } = createService();
+    prisma.annotation.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.update("user-1", "file-1", "annotation-1", { note: "new note", baseVersion: 3 })).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.syncChange.create).not.toHaveBeenCalled();
   });
 });
 

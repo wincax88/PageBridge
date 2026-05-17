@@ -75,6 +75,18 @@ export class AnnotationsService {
     }
     const { baseVersion: _baseVersion, clientRequestId: _clientRequestId, ...updateInput } = input;
     const annotation = await this.prisma.$transaction(async (tx) => {
+      if (input.baseVersion !== undefined) {
+        const result = await tx.annotation.updateMany({
+          where: { id: annotationId, userId, fileId, deletedAt: null, version: input.baseVersion },
+          data: { ...updateInput, version: { increment: 1 } } as never
+        });
+        if (result.count !== 1) throw new ConflictException("Annotation has changed on another device");
+        const updated = await tx.annotation.findFirst({ where: { id: annotationId, userId, fileId, deletedAt: null } });
+        if (!updated) throw new NotFoundException("Annotation not found");
+        await this.recordChange(userId, fileId, "update", updated.id, updated.version, updateInput, undefined, tx);
+        return updated;
+      }
+
       const updated = await tx.annotation.update({
         where: { id: annotationId },
         data: { ...updateInput, version: { increment: 1 } } as never
