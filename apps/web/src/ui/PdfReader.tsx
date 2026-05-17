@@ -200,7 +200,7 @@ export default function PdfReader({ token, userKey, file, syncPulse }: PdfReader
       await offlineDb.pdfFiles.put({ userKey, fileId, data: data.slice(0), updatedAt: new Date().toISOString() });
       return data;
     } catch (err) {
-      const cached = await offlineDb.pdfFiles.get([userKey, fileId]);
+      const cached = await offlineDb.pdfFiles.where("[userKey+fileId]").equals([userKey, fileId]).first();
       if (cached) return cached.data.slice(0);
       throw err;
     }
@@ -226,7 +226,7 @@ export default function PdfReader({ token, userKey, file, syncPulse }: PdfReader
         await cacheAnnotations(file.id, records);
         if (!cancelled) setAnnotations(records);
       } catch {
-        const cached = await offlineDb.annotationLists.get([userKey, file.id]);
+        const cached = await offlineDb.annotationLists.where("[userKey+fileId]").equals([userKey, file.id]).first();
         if (!cancelled && cached) {
           setAnnotations(cached.annotations as AnnotationRecord[]);
           setAnnotationStatus("queued");

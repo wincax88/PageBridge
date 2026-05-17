@@ -45,8 +45,8 @@ class PageBridgeDb extends Dexie {
     });
     this.version(4).stores({
       pendingChanges: "++id, userKey, [userKey+entityType], [userKey+entityId], createdAt",
-      pdfFiles: "[userKey+fileId], userKey, updatedAt",
-      annotationLists: "[userKey+fileId], userKey, updatedAt"
+      pdfFiles: "fileId, userKey, [userKey+fileId], updatedAt",
+      annotationLists: "fileId, userKey, [userKey+fileId], updatedAt"
     }).upgrade(async (transaction) => {
       const legacyUserKey = typeof localStorage === "undefined" ? "legacy" : localStorage.getItem("pagebridge.userEmail") ?? "legacy";
       await transaction.table("pendingChanges").toCollection().modify((change) => {
