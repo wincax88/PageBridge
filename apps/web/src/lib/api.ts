@@ -113,11 +113,13 @@ async function fetchWithAuthRetry(path: string, options: RequestInit = {}, token
 }
 
 function fetchApi(path: string, options: RequestInit = {}, token?: string, isJson = false) {
+  const shouldSetJsonContentType = isJson && !(options.body instanceof FormData);
+
   return fetch(`${apiBaseUrl}${path}`, {
     ...options,
     credentials: "include",
     headers: {
-      ...(isJson ? { "Content-Type": "application/json" } : {}),
+      ...(shouldSetJsonContentType ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers
     }
@@ -195,39 +197,10 @@ export function getSyncState(token: string) {
 }
 
 export async function uploadPdf(token: string, file: File) {
-  const target = await apiRequest<UploadTargetRecord>(
-    "/files/upload-target",
-    {
-      method: "POST",
-      body: JSON.stringify({ name: file.name, sizeBytes: file.size })
-    },
-    token
-  );
+  const formData = new FormData();
+  formData.append("file", file);
 
-  const response = await fetch(target.uploadUrl, {
-    method: "PUT",
-    headers: target.uploadHeaders,
-    body: file
-  });
-
-  if (!response.ok) {
-    const message = await response.text();
-    throw new ApiError(message || `Upload failed: ${response.status}`, response.status);
-  }
-
-  return apiRequest<FileRecord>(
-    "/files/complete-upload",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        fileId: target.fileId,
-        name: target.name,
-        sizeBytes: file.size,
-        storageKey: target.storageKey
-      })
-    },
-    token
-  );
+  return apiRequest<FileRecord>("/files/upload", { method: "POST", body: formData }, token);
 }
 
 export function renameFile(token: string, fileId: string, name: string) {
