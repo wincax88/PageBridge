@@ -1,6 +1,14 @@
 import { useAuthStore } from "../store/auth-store";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
+declare global {
+  interface Window {
+    __PAGEBRIDGE_CONFIG__?: {
+      VITE_API_BASE_URL?: string;
+    };
+  }
+}
+
+const apiBaseUrl = window.__PAGEBRIDGE_CONFIG__?.VITE_API_BASE_URL ?? import.meta.env.VITE_API_BASE_URL ?? "/api";
 let refreshPromise: Promise<AuthResponse | null> | null = null;
 
 export class ApiError extends Error {
