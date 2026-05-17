@@ -52,7 +52,7 @@ export class StorageService {
   createPresignedPutUrl(storageKey: string, contentType = "application/pdf") {
     return getSignedUrl(
       this.client,
-      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ContentType: contentType, ...this.encryptionOptions() }),
+      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ...this.encryptionOptions() }),
       { expiresIn: 10 * 60 }
     );
   }
@@ -60,14 +60,13 @@ export class StorageService {
   createPublicPresignedPutUrl(storageKey: string, contentType = "application/pdf") {
     return getSignedUrl(
       this.presignClient,
-      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ContentType: contentType, ...this.encryptionOptions() }),
+      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ...this.encryptionOptions() }),
       { expiresIn: 10 * 60 }
     );
   }
 
-  getPresignedPutHeaders(contentType = "application/pdf") {
+  getPresignedPutHeaders() {
     return {
-      "Content-Type": contentType,
       ...(this.serverSideEncryption ? { "x-amz-server-side-encryption": this.serverSideEncryption } : {}),
       ...(this.serverSideEncryption === "aws:kms" && this.sseKmsKeyId ? { "x-amz-server-side-encryption-aws-kms-key-id": this.sseKmsKeyId } : {})
     };
