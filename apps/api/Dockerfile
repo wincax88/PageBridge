@@ -26,7 +26,7 @@ COPY apps/api/prisma apps/api/prisma
 COPY packages/shared/package.json packages/shared/package.json
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY apps/api/docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
 WORKDIR /app/apps/api
+RUN npm run prisma:generate && chmod +x /docker-entrypoint.sh
 EXPOSE 4000
 CMD ["/docker-entrypoint.sh"]
