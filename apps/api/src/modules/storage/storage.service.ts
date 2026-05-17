@@ -1,14 +1,15 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, type ServerSideEncryption } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { Client as MinioClient } from "minio";
+import type { BucketItem } from "minio/dist/main/internal/type";
+import { Readable } from "stream";
 
 @Injectable()
 export class StorageService {
   private readonly bucket: string;
-  private readonly client: S3Client;
-  private readonly presignClient: S3Client;
-  private readonly serverSideEncryption?: ServerSideEncryption;
+  private readonly client: MinioClient;
+  private readonly presignClient: MinioClient;
+  private readonly serverSideEncryption?: "AES256" | "aws:kms";
   private readonly sseKmsKeyId?: string;
 
   constructor(config: ConfigService) {
@@ -21,48 +22,29 @@ export class StorageService {
     const serverSideEncryption = config.get<string>("S3_SERVER_SIDE_ENCRYPTION");
     this.serverSideEncryption = serverSideEncryption === "AES256" || serverSideEncryption === "aws:kms" ? serverSideEncryption : undefined;
     this.sseKmsKeyId = config.get<string>("S3_SSE_KMS_KEY_ID");
-    const clientOptions = {
-      endpoint,
-      region: config.get<string>("S3_REGION") ?? "us-east-1",
-      forcePathStyle: config.get<string>("S3_FORCE_PATH_STYLE") === "true",
-      credentials: {
-        accessKeyId: this.getRequiredStorageConfig(config, "S3_ACCESS_KEY_ID", "pagebridge", isProduction),
-        secretAccessKey: this.getRequiredStorageConfig(config, "S3_SECRET_ACCESS_KEY", "pagebridge-secret", isProduction)
-      }
-    };
-    this.client = new S3Client(clientOptions);
-    this.presignClient = new S3Client({
-      ...clientOptions,
-      endpoint: config.get<string>("S3_PUBLIC_ENDPOINT") || clientOptions.endpoint
-    });
+    const clientOptions = this.clientOptions(
+      endpoint ?? "http://localhost:9000",
+      this.getRequiredStorageConfig(config, "S3_ACCESS_KEY_ID", "pagebridge", isProduction),
+      this.getRequiredStorageConfig(config, "S3_SECRET_ACCESS_KEY", "pagebridge-secret", isProduction),
+      config.get<string>("S3_REGION") ?? "us-east-1"
+    );
+    this.client = new MinioClient(clientOptions);
+    this.presignClient = new MinioClient(this.clientOptions(config.get<string>("S3_PUBLIC_ENDPOINT") || endpoint || "http://localhost:9000", clientOptions.accessKey, clientOptions.secretKey, clientOptions.region));
   }
 
   async putPdf(storageKey: string, body: Buffer, contentType = "application/pdf") {
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: storageKey,
-        Body: body,
-        ContentType: contentType,
-        ...this.encryptionOptions()
-      })
-    );
+    await this.client.putObject(this.bucket, storageKey, body, body.length, {
+      "Content-Type": contentType,
+      ...this.encryptionHeaders()
+    });
   }
 
-  createPresignedPutUrl(storageKey: string, contentType = "application/pdf") {
-    return getSignedUrl(
-      this.client,
-      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ...this.encryptionOptions() }),
-      { expiresIn: 10 * 60 }
-    );
+  createPresignedPutUrl(storageKey: string) {
+    return this.client.presignedPutObject(this.bucket, storageKey, 10 * 60);
   }
 
-  createPublicPresignedPutUrl(storageKey: string, contentType = "application/pdf") {
-    return getSignedUrl(
-      this.presignClient,
-      new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ...this.encryptionOptions() }),
-      { expiresIn: 10 * 60 }
-    );
+  createPublicPresignedPutUrl(storageKey: string) {
+    return this.presignClient.presignedPutObject(this.bucket, storageKey, 10 * 60);
   }
 
   getPresignedPutHeaders() {
@@ -73,36 +55,29 @@ export class StorageService {
   }
 
   async getPdf(storageKey: string) {
-    const object = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: storageKey }));
-    const bytes = await object.Body?.transformToByteArray();
-    return Buffer.from(bytes ?? []);
+    return this.streamToBuffer(await this.client.getObject(this.bucket, storageKey));
   }
 
   async getObjectMetadata(storageKey: string) {
-    return this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: storageKey }));
+    const stat = await this.client.statObject(this.bucket, storageKey);
+    return { ContentLength: stat.size, ContentType: stat.metaData?.["content-type"] ?? stat.metaData?.["Content-Type"] };
   }
 
   async getObjectPrefix(storageKey: string, byteCount: number) {
-    const object = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: storageKey, Range: `bytes=0-${Math.max(0, byteCount - 1)}` }));
-    const bytes = await object.Body?.transformToByteArray();
-    return Buffer.from(bytes ?? []);
+    return this.streamToBuffer(await this.client.getPartialObject(this.bucket, storageKey, 0, byteCount));
   }
 
   async deleteObject(storageKey: string) {
-    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: storageKey }));
+    await this.client.removeObject(this.bucket, storageKey);
   }
 
   async listObjectKeys(prefix: string) {
     const objects: Array<{ key: string; lastModified?: Date }> = [];
-    let continuationToken: string | undefined;
+    const stream = this.client.listObjectsV2(this.bucket, prefix, true);
 
-    do {
-      const response = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: continuationToken }));
-      for (const object of response.Contents ?? []) {
-        if (object.Key) objects.push({ key: object.Key, lastModified: object.LastModified });
-      }
-      continuationToken = response.NextContinuationToken;
-    } while (continuationToken);
+    for await (const object of stream as AsyncIterable<BucketItem>) {
+      if (object.name) objects.push({ key: object.name, lastModified: object.lastModified });
+    }
 
     return objects;
   }
@@ -111,11 +86,32 @@ export class StorageService {
     return `users/${userId}/files/${fileId}.pdf`;
   }
 
-  private encryptionOptions() {
+  private encryptionHeaders() {
     return {
-      ...(this.serverSideEncryption ? { ServerSideEncryption: this.serverSideEncryption } : {}),
-      ...(this.serverSideEncryption === "aws:kms" && this.sseKmsKeyId ? { SSEKMSKeyId: this.sseKmsKeyId } : {})
+      ...(this.serverSideEncryption ? { "x-amz-server-side-encryption": this.serverSideEncryption } : {}),
+      ...(this.serverSideEncryption === "aws:kms" && this.sseKmsKeyId ? { "x-amz-server-side-encryption-aws-kms-key-id": this.sseKmsKeyId } : {})
     };
+  }
+
+  private clientOptions(endpoint: string, accessKey: string, secretKey: string, region: string) {
+    const url = new URL(endpoint);
+    return {
+      endPoint: url.hostname,
+      port: url.port ? Number(url.port) : undefined,
+      useSSL: url.protocol === "https:",
+      accessKey,
+      secretKey,
+      region
+    };
+  }
+
+  private streamToBuffer(stream: Readable) {
+    return new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      stream.on("data", (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      stream.on("error", reject);
+      stream.on("end", () => resolve(Buffer.concat(chunks)));
+    });
   }
 
   private getRequiredStorageConfig(config: ConfigService, key: string, fallback: string, isProduction: boolean) {
