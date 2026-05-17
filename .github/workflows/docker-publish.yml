@@ -1,0 +1,61 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image owner
+        id: image-owner
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.image-owner.outputs.owner }}/pagebridge-api:latest
+            ghcr.io/${{ steps.image-owner.outputs.owner }}/pagebridge-api:${{ github.sha }}
+          cache-from: type=gha,scope=pagebridge-api
+          cache-to: type=gha,mode=max,scope=pagebridge-api
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.image-owner.outputs.owner }}/pagebridge-web:latest
+            ghcr.io/${{ steps.image-owner.outputs.owner }}/pagebridge-web:${{ github.sha }}
+          cache-from: type=gha,scope=pagebridge-web
+          cache-to: type=gha,mode=max,scope=pagebridge-web
