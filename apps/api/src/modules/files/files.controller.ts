@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Req, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import type { Request } from "express";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { IsBoolean, IsInt, IsNumber, IsString } from "class-validator";
@@ -71,22 +71,23 @@ export class FilesController {
   }
 
   @Post("upload-target")
+  // Legacy PDF-only direct upload flow. DjVu uploads must use POST /files/upload.
   createUploadTarget(@CurrentUser() user: CurrentUser, @Body() body: CreateUploadTargetDto) {
     return this.files.createUploadTarget(user.id, body.name, body.sizeBytes);
   }
 
   @Post("complete-upload")
+  // Completes the legacy PDF-only direct upload flow.
   completeUpload(@CurrentUser() user: CurrentUser, @Body() body: CompleteUploadDto) {
     return this.files.completeUpload(user.id, body);
   }
 
   @Get(":fileId/content")
-  @Header("Content-Type", "application/pdf")
   async content(@CurrentUser() user: CurrentUser, @Param("fileId") fileId: string) {
     const file = await this.files.getContent(user.id, fileId);
     return new StreamableFile(file.buffer, {
       disposition: `inline; filename="${encodeURIComponent(file.name)}"`,
-      type: "application/pdf"
+      type: file.mimeType
     });
   }
 

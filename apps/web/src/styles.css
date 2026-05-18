@@ -912,6 +912,30 @@ label {
   height: 100vh;
 }
 
+.djvu-reader-active {
+  display: block;
+  position: relative;
+}
+
+.djvu-reader-host {
+  height: 100vh;
+  width: 100%;
+}
+
+.djvu-reader-status {
+  background: rgb(255 255 255 / 92%);
+  border: 1px solid var(--pb-border);
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 30px rgb(15 23 42 / 12%);
+  left: 50%;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  position: absolute;
+  top: 1rem;
+  transform: translateX(-50%);
+  z-index: 5;
+}
+
 .missing-reader {
   margin: 2rem;
 }

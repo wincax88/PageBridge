@@ -16,11 +16,12 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { deleteFile, emptyTrash, getStorageUsage, getSyncState, listDeletedFiles, listFiles, listSyncChanges, login, logout, permanentlyDeleteFile, refreshAccessToken, register, renameFile, restoreFile, updateFileFavorite, uploadPdf, type DeletedFileRecord, type FileRecord } from "../lib/api";
+import { deleteFile, emptyTrash, getStorageUsage, getSyncState, listDeletedFiles, listFiles, listSyncChanges, login, logout, permanentlyDeleteFile, refreshAccessToken, register, renameFile, restoreFile, updateFileFavorite, uploadDocument, type DeletedFileRecord, type FileRecord } from "../lib/api";
 import { offlineDb } from "../lib/offline-db";
 import { useAuthStore } from "../store/auth-store";
 
 const PdfReader = lazy(() => import("./PdfReader"));
+const DjvuReader = lazy(() => import("./DjvuReader"));
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 const MAX_OFFLINE_UPLOAD_QUEUE_BYTES = 25 * 1024 * 1024;
 const SYNC_POLL_INTERVAL_MS = 2000;
@@ -128,7 +129,7 @@ export function App() {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: (file: File) => uploadPdf(accessToken!, file),
+    mutationFn: (file: File) => uploadDocument(accessToken!, file),
     onSuccess: (file) => {
       setSelectedFile(file);
       navigate(`/reader/${file.id}`);
@@ -373,7 +374,7 @@ export function App() {
         if (change.operation === "create") {
           const payload = change.payload as PendingFileUploadPayload;
           const file = new File([payload.data], payload.name, { type: payload.type || "application/pdf", lastModified: payload.lastModified });
-          const uploaded = await uploadPdf(accessToken, file);
+          const uploaded = await uploadDocument(accessToken, file);
           setSelectedFile(uploaded);
         } else if (change.operation === "update") {
           const payload = change.payload as PendingFileRenamePayload;
@@ -397,12 +398,12 @@ export function App() {
   }
 
   async function handleUploadFile(file: File) {
-    if (file.type !== "application/pdf") {
-      setFileActionError("Only PDF files are supported");
+    if (!isSupportedDocumentFile(file)) {
+      setFileActionError("Only PDF and DjVu files are supported");
       return;
     }
     if (file.size > MAX_UPLOAD_SIZE_BYTES) {
-      setFileActionError("PDF file must be 200MB or smaller");
+      setFileActionError("Document file must be 200MB or smaller");
       return;
     }
 
@@ -413,7 +414,7 @@ export function App() {
     }
 
     try {
-      const uploaded = await uploadPdf(accessToken!, file);
+      const uploaded = await uploadDocument(accessToken!, file);
       setSelectedFile(uploaded);
       navigate(`/reader/${uploaded.id}`);
       setFileActionError(null);
@@ -556,7 +557,7 @@ export function App() {
     return activeFile ? (
       <main className="reader-route-shell">
         <Suspense fallback={<section className="reader-placeholder"><p>正在加载阅读器...</p></section>}>
-          <PdfReader token={accessToken} userKey={offlineUserKey} file={activeFile} syncPulse={syncPulse} />
+          {isDjvuFile(activeFile) ? <DjvuReader token={accessToken} file={activeFile} /> : <PdfReader token={accessToken} userKey={offlineUserKey} file={activeFile} syncPulse={syncPulse} />}
         </Suspense>
       </main>
     ) : (
@@ -759,20 +760,20 @@ export function App() {
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
         <DialogContent className="app-dialog upload-dialog">
           <DialogHeader>
-            <DialogTitle>上传 PDF</DialogTitle>
-            <DialogDescription>选择电脑中的 PDF 文件，最大支持 200MB。</DialogDescription>
+            <DialogTitle>上传文档</DialogTitle>
+            <DialogDescription>选择电脑中的 PDF 或 DjVu 文件，最大支持 200MB。</DialogDescription>
           </DialogHeader>
           <Label
             className="upload-dropzone"
             onDragOver={(event) => event.preventDefault()}
             onDrop={handleUploadDrop}
           >
-            <span>从文件中选择 PDF</span>
+            <span>从文件中选择 PDF 或 DjVu</span>
             <small>或点击选择文件</small>
-            <em>支持 .pdf，最大 200MB</em>
+            <em>支持 .pdf、.djvu、.djv，最大 200MB</em>
             <input
               type="file"
-              accept="application/pdf"
+              accept="application/pdf,.pdf,image/vnd.djvu,image/x-djvu,.djvu,.djv"
               disabled={uploadMutation.isPending}
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -1155,6 +1156,16 @@ function formatFileMeta(file: FileRecord) {
   return `${pageLabel} · ${sizeLabel}`;
 }
 
+function isDjvuFile(file: FileRecord) {
+  const name = file.name.toLowerCase();
+  return file.mimeType === "image/vnd.djvu" || file.mimeType === "image/x-djvu" || name.endsWith(".djvu") || name.endsWith(".djv");
+}
+
+function isSupportedDocumentFile(file: File) {
+  const name = file.name.toLowerCase();
+  return file.type === "application/pdf" || file.type === "image/vnd.djvu" || file.type === "image/x-djvu" || name.endsWith(".pdf") || name.endsWith(".djvu") || name.endsWith(".djv");
+}
+
 function getPageTitle(pathname: string) {
   if (pathname === "/recent") return "最近阅读";
   if (pathname === "/favorites") return "收藏文档";
@@ -1172,9 +1183,9 @@ function EmptyLibrary({ onUpload }: { onUpload: () => void }) {
   return (
     <div className="empty-library">
       <div className="empty-file-icon">PDF</div>
-      <h2>还没有 PDF 文件</h2>
-      <p>上传你的第一份 PDF，开始阅读和标注。</p>
-      <Button onClick={onUpload}>上传 PDF</Button>
+      <h2>还没有文档</h2>
+      <p>上传你的第一份 PDF 或 DjVu，开始阅读和标注。</p>
+      <Button onClick={onUpload}>上传文档</Button>
     </div>
   );
 }

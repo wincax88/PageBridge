@@ -27,6 +27,7 @@ export interface FileRecord {
   id: string;
   name: string;
   sizeBytes: string | number;
+  mimeType: string;
   pageCount: number | null;
   isFavorite: boolean;
   updatedAt: string;
@@ -197,7 +198,7 @@ export function getSyncState(token: string) {
   return apiRequest<SyncStateRecord>("/sync/state", {}, token);
 }
 
-export async function uploadPdf(token: string, file: File) {
+export async function uploadDocument(token: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("name", file.name);

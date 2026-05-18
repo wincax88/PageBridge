@@ -32,11 +32,15 @@ export class StorageService {
     this.presignClient = new MinioClient(this.clientOptions(config.get<string>("S3_PUBLIC_ENDPOINT") || endpoint || "http://localhost:9000", clientOptions.accessKey, clientOptions.secretKey, clientOptions.region));
   }
 
-  async putPdf(storageKey: string, body: Buffer, contentType = "application/pdf") {
+  async putDocument(storageKey: string, body: Buffer, contentType = "application/pdf") {
     await this.client.putObject(this.bucket, storageKey, body, body.length, {
       "Content-Type": contentType,
       ...this.encryptionHeaders()
     });
+  }
+
+  async putPdf(storageKey: string, body: Buffer, contentType = "application/pdf") {
+    await this.putDocument(storageKey, body, contentType);
   }
 
   createPresignedPutUrl(storageKey: string) {
@@ -82,8 +86,8 @@ export class StorageService {
     return objects;
   }
 
-  buildUserFileKey(userId: string, fileId: string) {
-    return `users/${userId}/files/${fileId}.pdf`;
+  buildUserFileKey(userId: string, fileId: string, extension = "pdf") {
+    return `users/${userId}/files/${fileId}.${extension}`;
   }
 
   private encryptionHeaders() {

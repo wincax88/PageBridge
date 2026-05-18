@@ -18,6 +18,8 @@ const FREE_USER_FILE_COUNT_QUOTA = 500;
 const SOFT_DELETE_RETENTION_DAYS = 30;
 const ORPHAN_UPLOAD_RETENTION_MS = 60 * 60 * 1000;
 const TRANSACTION_RETRY_ATTEMPTS = 3;
+const DJVU_MIME_TYPE = "image/vnd.djvu";
+const SUPPORTED_DJVU_MIME_TYPES = [DJVU_MIME_TYPE, "image/x-djvu", "image/djvu"];
 
 @Injectable()
 export class FilesService {
@@ -32,7 +34,7 @@ export class FilesService {
     const files = await this.prisma.file.findMany({
       where: { userId, deletedAt: null },
       orderBy: { updatedAt: "desc" },
-      select: { id: true, name: true, sizeBytes: true, pageCount: true, isFavorite: true, updatedAt: true }
+      select: { id: true, name: true, sizeBytes: true, mimeType: true, pageCount: true, isFavorite: true, updatedAt: true }
     });
     return files.map((file) => ({ ...file, sizeBytes: file.sizeBytes.toString() }));
   }
@@ -42,7 +44,7 @@ export class FilesService {
     const files = await this.prisma.file.findMany({
       where: { userId, deletedAt: { not: null } },
       orderBy: { deletedAt: "desc" },
-      select: { id: true, name: true, sizeBytes: true, pageCount: true, isFavorite: true, updatedAt: true, deletedAt: true }
+      select: { id: true, name: true, sizeBytes: true, mimeType: true, pageCount: true, isFavorite: true, updatedAt: true, deletedAt: true }
     });
     return files.map((file) => ({ ...file, sizeBytes: file.sizeBytes.toString() }));
   }
@@ -67,16 +69,15 @@ export class FilesService {
   async upload(userId: string, file: Express.Multer.File, preferredName?: string) {
     await this.purgeExpiredDeletedFiles(userId);
     await this.redis.limit(`rate:upload:${userId}`, 30, 60 * 60);
-    if (!file) throw new BadRequestException("PDF file is required");
-    if (file.mimetype !== "application/pdf") throw new BadRequestException("Only PDF files are supported");
-    if (file.size <= 0) throw new BadRequestException("PDF file is empty");
-    if (file.size > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
-    this.ensurePdfHeader(file.buffer);
-
+    if (!file) throw new BadRequestException("Document file is required");
     const name = this.normalizeFileName(this.resolveUploadFileName(preferredName, file.originalname));
+    const documentType = this.detectDocumentType(file, name);
+    this.validateUploadSize(file.size);
+    this.ensureDocumentHeader(file.buffer, documentType);
+
     const fileId = randomUUID();
-    const storageKey = this.storage.buildUserFileKey(userId, fileId);
-    await this.storage.putPdf(storageKey, file.buffer, file.mimetype);
+    const storageKey = this.storage.buildUserFileKey(userId, fileId, this.storageExtension(documentType));
+    await this.storage.putDocument(storageKey, file.buffer, documentType);
 
     try {
       const created = await this.runSerializableTransaction(async (tx) => {
@@ -88,7 +89,7 @@ export class FilesService {
             userId,
             name,
             sizeBytes: BigInt(file.size),
-            mimeType: file.mimetype,
+            mimeType: documentType,
             storageKey
           }
         });
@@ -108,6 +109,7 @@ export class FilesService {
     await this.redis.limit(`rate:upload:${userId}`, 30, 60 * 60);
     await this.maybePurgeOrphanUploadedObjects(userId);
     const normalizedName = this.normalizeFileName(name);
+    if (!normalizedName.toLowerCase().endsWith(".pdf")) throw new BadRequestException("Presigned uploads currently support PDF files only");
     this.validateUploadSize(sizeBytes);
     await this.ensureFileCountQuota(userId);
     await this.ensureStorageQuota(userId, sizeBytes);
@@ -148,7 +150,7 @@ export class FilesService {
 
   async getContent(userId: string, fileId: string) {
     const file = await this.ensureFile(userId, fileId);
-    return { name: file.name, buffer: await this.storage.getPdf(file.storageKey) };
+    return { name: file.name, mimeType: file.mimeType, buffer: await this.storage.getPdf(file.storageKey) };
   }
 
   async rename(userId: string, fileId: string, name: string) {
@@ -278,12 +280,37 @@ export class FilesService {
   }
 
   private validateUploadSize(sizeBytes: number) {
-    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) throw new BadRequestException("PDF file is empty");
-    if (sizeBytes > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) throw new BadRequestException("Document file is empty");
+    if (sizeBytes > MAX_FILE_SIZE_BYTES) throw new BadRequestException("Document file must be 200MB or smaller");
+  }
+
+  private ensureDocumentHeader(buffer: Buffer, mimeType: string) {
+    if (mimeType === "application/pdf") return this.ensurePdfHeader(buffer);
+    if (this.isDjvuMimeType(mimeType)) return this.ensureDjvuHeader(buffer);
+    throw new BadRequestException("Only PDF and DjVu files are supported");
   }
 
   private ensurePdfHeader(buffer: Buffer) {
     if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") throw new BadRequestException("Only PDF files are supported");
+  }
+
+  private ensureDjvuHeader(buffer: Buffer) {
+    if (buffer.subarray(0, 8).toString("ascii") !== "AT&TFORM") throw new BadRequestException("Only DjVu files are supported");
+  }
+
+  private detectDocumentType(file: Express.Multer.File, name: string) {
+    const lowerName = name.toLowerCase();
+    if (file.mimetype === "application/pdf" || lowerName.endsWith(".pdf")) return "application/pdf";
+    if (SUPPORTED_DJVU_MIME_TYPES.includes(file.mimetype) || lowerName.endsWith(".djvu") || lowerName.endsWith(".djv")) return DJVU_MIME_TYPE;
+    throw new BadRequestException("Only PDF and DjVu files are supported");
+  }
+
+  private isDjvuMimeType(mimeType: string) {
+    return SUPPORTED_DJVU_MIME_TYPES.includes(mimeType);
+  }
+
+  private storageExtension(mimeType: string) {
+    return this.isDjvuMimeType(mimeType) ? "djvu" : "pdf";
   }
 
   private async ensureUploadedPdfHeader(storageKey: string) {
