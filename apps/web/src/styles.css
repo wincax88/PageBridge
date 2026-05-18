@@ -917,9 +917,37 @@ label {
   position: relative;
 }
 
+.reader-route-shell > .djvu-reader-active {
+  display: block;
+}
+
 .djvu-reader-host {
   height: 100vh;
   width: 100%;
+}
+
+.djvu-reader-bar {
+  align-items: center;
+  background: rgb(255 255 255 / 94%);
+  border: 1px solid var(--pb-border);
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgb(15 23 42 / 12%);
+  display: inline-flex;
+  gap: 0.75rem;
+  left: 1rem;
+  max-width: min(34rem, calc(100vw - 2rem));
+  padding: 0.25rem 0.85rem 0.25rem 0.45rem;
+  position: absolute;
+  top: 1rem;
+  z-index: 6;
+}
+
+.djvu-reader-bar strong {
+  color: var(--pb-ink);
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .djvu-reader-status {

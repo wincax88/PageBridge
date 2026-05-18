@@ -137,7 +137,7 @@ export function App() {
       queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
       queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
     },
-    onError: (error) => setFileActionError(error instanceof Error ? error.message : "Failed to upload PDF")
+    onError: (error) => setFileActionError(error instanceof Error ? error.message : "Failed to upload document")
   });
 
   const renameFileMutation = useMutation({
@@ -422,7 +422,7 @@ export function App() {
       queryClient.invalidateQueries({ queryKey: ["storage-usage", accessToken] });
     } catch (error) {
       if (!shouldQueueActionError(error)) {
-        setFileActionError(error instanceof Error ? error.message : "Failed to upload PDF");
+        setFileActionError(error instanceof Error ? error.message : "Failed to upload document");
         return;
       }
 
@@ -442,7 +442,7 @@ export function App() {
   async function queuePendingFileUpload(file: File) {
     if (file.size > MAX_OFFLINE_UPLOAD_QUEUE_BYTES) {
       setFileSyncStatus("failed");
-      setFileActionError("This PDF is too large to queue offline. Please upload it when you are online.");
+      setFileActionError("This document is too large to queue offline. Please upload it when you are online.");
       return false;
     }
 
@@ -465,7 +465,7 @@ export function App() {
       return true;
     } catch {
       setFileSyncStatus("failed");
-      setFileActionError("Could not queue this PDF locally. Browser storage may be full; please retry when online.");
+      setFileActionError("Could not queue this document locally. Browser storage may be full; please retry when online.");
       return false;
     }
   }
@@ -489,7 +489,7 @@ export function App() {
   const visibleFiles = isFavoritesRoute ? filteredFiles.filter((file) => file.isFavorite) : filteredFiles;
   const emptyDocumentMessage = isFavoritesRoute
     ? "暂无收藏文档。点击文档卡片上的星标即可收藏。"
-    : `没有匹配“${fileSearch}”的 PDF。`;
+    : `没有匹配“${fileSearch}”的文档。`;
   const recentFiles = filteredFiles.slice(0, 2);
   const effectiveDocumentView = documentView;
   const pageTitle = getPageTitle(location.pathname);
@@ -564,8 +564,8 @@ export function App() {
       <main className="reader-route-shell">
         <section className="reader-placeholder missing-reader">
           <p className="eyebrow">阅读器</p>
-          <h2>未找到 PDF</h2>
-          <p>请返回文件库选择一个 PDF，或上传新的文档。</p>
+          <h2>未找到文档</h2>
+          <p>请返回文件库选择一个文档，或上传新的文档。</p>
           <Button onClick={() => navigate("/library")}>返回文件库</Button>
         </section>
       </main>
@@ -601,7 +601,7 @@ export function App() {
         </Label>
         <div className="toolbar-status"><CheckCircle2 size={18} /> 已同步</div>
         <div className="create-file">
-          <Button onClick={() => setUploadDialogOpen(true)} disabled={uploadMutation.isPending}><Upload size={16} />{uploadMutation.isPending ? "正在上传..." : "上传 PDF"}</Button>
+          <Button onClick={() => setUploadDialogOpen(true)} disabled={uploadMutation.isPending}><Upload size={16} />{uploadMutation.isPending ? "正在上传..." : "上传文档"}</Button>
         </div>
         <div className="avatar" aria-hidden="true">A</div>
       </header>
@@ -660,7 +660,7 @@ export function App() {
           <section className={`file-list ${effectiveDocumentView === "list" ? "list-view" : "grid-view"}`}>
             <header className="library-heading">
               <h1>{pageTitle}</h1>
-              <Button className="mobile-upload-button" variant="ghost" onClick={() => setUploadDialogOpen(true)}><Upload size={16} />上传 PDF</Button>
+              <Button className="mobile-upload-button" variant="ghost" onClick={() => setUploadDialogOpen(true)}><Upload size={16} />上传文档</Button>
               <div className="view-toggle" aria-label="切换文档视图">
                 <button className={effectiveDocumentView === "grid" ? "active" : ""} type="button" onClick={() => setDocumentView("grid")} aria-label="网格视图"><Grid3X3 size={18} /></button>
                 <button className={effectiveDocumentView === "list" ? "active" : ""} type="button" onClick={() => setDocumentView("list")} aria-label="列表视图"><List size={18} /></button>
@@ -800,8 +800,8 @@ export function App() {
             }}
           >
             <DialogHeader>
-              <DialogTitle>重命名 PDF</DialogTitle>
-              <DialogDescription>为文件设置清晰的资料库名称，不会修改 PDF 原文件。</DialogDescription>
+              <DialogTitle>重命名文档</DialogTitle>
+              <DialogDescription>为文件设置清晰的资料库名称，不会修改原文件。</DialogDescription>
             </DialogHeader>
             <Label className="dialog-field">
               文件名
@@ -818,14 +818,14 @@ export function App() {
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent className="app-dialog">
           <AlertDialogHeader>
-            <AlertDialogTitle>删除这个 PDF？</AlertDialogTitle>
+            <AlertDialogTitle>删除这个文档？</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget ? `${deleteTarget.name} 将从文件库移除，并同步到其他设备。` : "该文件将从文件库移除。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction className="danger-action" onClick={() => deleteTarget && void handleDeleteFile(deleteTarget)}>删除 PDF</AlertDialogAction>
+            <AlertDialogAction className="danger-action" onClick={() => deleteTarget && void handleDeleteFile(deleteTarget)}>删除文档</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1157,8 +1157,7 @@ function formatFileMeta(file: FileRecord) {
 }
 
 function isDjvuFile(file: FileRecord) {
-  const name = file.name.toLowerCase();
-  return file.mimeType === "image/vnd.djvu" || file.mimeType === "image/x-djvu" || name.endsWith(".djvu") || name.endsWith(".djv");
+  return file.mimeType === "image/vnd.djvu" || file.mimeType === "image/x-djvu";
 }
 
 function isSupportedDocumentFile(file: File) {

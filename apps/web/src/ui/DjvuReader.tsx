@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ChevronLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { downloadPdf, type FileRecord } from "../lib/api";
 
 const DJVU_LIBRARY_URL = "/vendor/djvu/djvu.js";
@@ -39,6 +42,7 @@ const viewerConfig = {
 };
 
 export default function DjvuReader({ token, file }: DjvuReaderProps) {
+  const navigate = useNavigate();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<DjVuViewer | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -81,6 +85,12 @@ export default function DjvuReader({ token, file }: DjvuReaderProps) {
 
   return (
     <section className="reader-active djvu-reader-active">
+      <div className="djvu-reader-bar">
+        <Button className="reader-back" variant="link" onClick={() => navigate("/library")}>
+          <ChevronLeft size={18} /> 文件库
+        </Button>
+        <strong>{file.name}</strong>
+      </div>
       <div className="djvu-reader-host" ref={hostRef} />
       {isLoading ? <p className="djvu-reader-status">正在加载 DjVu...</p> : null}
       {error ? <p className="djvu-reader-status error">{error}</p> : null}
