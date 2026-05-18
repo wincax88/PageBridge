@@ -735,6 +735,51 @@ label {
   padding: 0;
 }
 
+.card-quick-actions {
+  display: flex;
+  gap: 0.45rem;
+  position: absolute;
+  right: 0.85rem;
+  top: 0.85rem;
+  z-index: 2;
+}
+
+.quick-action {
+  align-items: center;
+  background: rgb(255 255 255 / 92%);
+  border: 1px solid rgb(226 232 240 / 85%);
+  border-radius: 999px;
+  color: #475569;
+  cursor: pointer;
+  display: inline-flex;
+  height: 2.15rem;
+  justify-content: center;
+  padding: 0;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+  width: 2.15rem;
+}
+
+.quick-action:hover {
+  background: #fff;
+  color: var(--pb-green);
+  transform: translateY(-1px);
+}
+
+.quick-action.active {
+  background: #fef3c7;
+  border-color: #facc15;
+  color: #b45309;
+}
+
+.quick-action.danger:hover {
+  color: #b91c1c;
+}
+
+.quick-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .file-card-body {
   display: grid;
   gap: 0.4rem;
@@ -797,6 +842,10 @@ label {
   border-radius: 0.25rem;
   height: 64px;
   width: 48px;
+}
+
+.list-view .card-quick-actions {
+  position: static;
 }
 
 .list-view .file-card-body {

@@ -28,6 +28,7 @@ export interface FileRecord {
   name: string;
   sizeBytes: string | number;
   pageCount: number | null;
+  isFavorite: boolean;
   updatedAt: string;
 }
 
@@ -199,6 +200,7 @@ export function getSyncState(token: string) {
 export async function uploadPdf(token: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("name", file.name);
 
   return apiRequest<FileRecord>("/files/upload", { method: "POST", body: formData }, token);
 }
@@ -220,6 +222,17 @@ export function updateFilePageCount(token: string, fileId: string, pageCount: nu
     {
       method: "PATCH",
       body: JSON.stringify({ pageCount })
+    },
+    token
+  );
+}
+
+export function updateFileFavorite(token: string, fileId: string, isFavorite: boolean) {
+  return apiRequest<FileRecord>(
+    `/files/${fileId}/favorite`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ isFavorite })
     },
     token
   );

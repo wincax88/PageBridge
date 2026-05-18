@@ -32,7 +32,7 @@ export class FilesService {
     const files = await this.prisma.file.findMany({
       where: { userId, deletedAt: null },
       orderBy: { updatedAt: "desc" },
-      select: { id: true, name: true, sizeBytes: true, pageCount: true, updatedAt: true }
+      select: { id: true, name: true, sizeBytes: true, pageCount: true, isFavorite: true, updatedAt: true }
     });
     return files.map((file) => ({ ...file, sizeBytes: file.sizeBytes.toString() }));
   }
@@ -42,7 +42,7 @@ export class FilesService {
     const files = await this.prisma.file.findMany({
       where: { userId, deletedAt: { not: null } },
       orderBy: { deletedAt: "desc" },
-      select: { id: true, name: true, sizeBytes: true, pageCount: true, updatedAt: true, deletedAt: true }
+      select: { id: true, name: true, sizeBytes: true, pageCount: true, isFavorite: true, updatedAt: true, deletedAt: true }
     });
     return files.map((file) => ({ ...file, sizeBytes: file.sizeBytes.toString() }));
   }
@@ -64,7 +64,7 @@ export class FilesService {
     };
   }
 
-  async upload(userId: string, file: Express.Multer.File) {
+  async upload(userId: string, file: Express.Multer.File, preferredName?: string) {
     await this.purgeExpiredDeletedFiles(userId);
     await this.redis.limit(`rate:upload:${userId}`, 30, 60 * 60);
     if (!file) throw new BadRequestException("PDF file is required");
@@ -73,7 +73,7 @@ export class FilesService {
     if (file.size > MAX_FILE_SIZE_BYTES) throw new BadRequestException("PDF file must be 200MB or smaller");
     this.ensurePdfHeader(file.buffer);
 
-    const name = this.normalizeFileName(file.originalname);
+    const name = this.normalizeFileName(this.resolveUploadFileName(preferredName, file.originalname));
     const fileId = randomUUID();
     const storageKey = this.storage.buildUserFileKey(userId, fileId);
     await this.storage.putPdf(storageKey, file.buffer, file.mimetype);
@@ -178,6 +178,18 @@ export class FilesService {
     return { ...file, sizeBytes: file.sizeBytes.toString() };
   }
 
+  async updateFavorite(userId: string, fileId: string, isFavorite: boolean) {
+    const current = await this.ensureFile(userId, fileId);
+    if (current.isFavorite === isFavorite) return { ...current, sizeBytes: current.sizeBytes.toString() };
+
+    const file = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.file.update({ where: { id: fileId }, data: { isFavorite } });
+      await this.recordChange(userId, fileId, "update", fileId, { isFavorite }, tx);
+      return updated;
+    });
+    return { ...file, sizeBytes: file.sizeBytes.toString() };
+  }
+
   async softDelete(userId: string, fileId: string) {
     const current = await this.prisma.file.findFirst({ where: { id: fileId, userId } });
     if (!current) throw new NotFoundException("File not found");
@@ -246,6 +258,16 @@ export class FilesService {
     const file = await db.file.findFirst({ where: { id: fileId, userId, deletedAt: { not: null } } });
     if (!file) throw new NotFoundException("Deleted file not found");
     return file;
+  }
+
+  private resolveUploadFileName(preferredName: string | undefined, originalname: string) {
+    const trimmedPreferredName = preferredName?.trim();
+    if (trimmedPreferredName) return trimmedPreferredName;
+    return this.decodeMulterOriginalName(originalname);
+  }
+
+  private decodeMulterOriginalName(originalname: string) {
+    return Buffer.from(originalname, "latin1").toString("utf8");
   }
 
   private normalizeFileName(name: string) {

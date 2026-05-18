@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, Header, Param, Patch, Post, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Req, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import type { Request } from "express";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { IsInt, IsNumber, IsString } from "class-validator";
+import { IsBoolean, IsInt, IsNumber, IsString } from "class-validator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { FilesService } from "./files.service";
@@ -13,6 +14,11 @@ class RenameFileDto {
 class UpdatePageCountDto {
   @IsInt()
   pageCount!: number;
+}
+
+class UpdateFavoriteDto {
+  @IsBoolean()
+  isFavorite!: boolean;
 }
 
 class CreateUploadTargetDto {
@@ -59,8 +65,9 @@ export class FilesController {
 
   @Post("upload")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 200 * 1024 * 1024 } }))
-  upload(@CurrentUser() user: CurrentUser, @UploadedFile() file: Express.Multer.File) {
-    return this.files.upload(user.id, file);
+  upload(@CurrentUser() user: CurrentUser, @UploadedFile() file: Express.Multer.File, @Req() req: Request) {
+    const preferredName = typeof req.body?.name === "string" ? req.body.name : undefined;
+    return this.files.upload(user.id, file, preferredName);
   }
 
   @Post("upload-target")
@@ -91,6 +98,11 @@ export class FilesController {
   @Patch(":fileId/page-count")
   updatePageCount(@CurrentUser() user: CurrentUser, @Param("fileId") fileId: string, @Body() body: UpdatePageCountDto) {
     return this.files.updatePageCount(user.id, fileId, body.pageCount);
+  }
+
+  @Patch(":fileId/favorite")
+  updateFavorite(@CurrentUser() user: CurrentUser, @Param("fileId") fileId: string, @Body() body: UpdateFavoriteDto) {
+    return this.files.updateFavorite(user.id, fileId, Boolean(body.isFavorite));
   }
 
   @Patch("trash/:fileId/restore")

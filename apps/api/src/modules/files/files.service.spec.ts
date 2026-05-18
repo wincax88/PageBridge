@@ -119,6 +119,47 @@ describe("FilesService.upload", () => {
     expect(storage.deleteObject).toHaveBeenCalled();
     expect(prisma.file.create).not.toHaveBeenCalled();
   });
+
+  it("decodes UTF-8 filenames from multipart uploads", async () => {
+    const { service, prisma } = createService();
+    const utf8Name = "测试文档.pdf";
+    const mojibakeName = Buffer.from(utf8Name, "utf8").toString("latin1");
+
+    await service.upload("user-1", {
+      originalname: mojibakeName,
+      mimetype: "application/pdf",
+      size: 1234,
+      buffer: Buffer.from("%PDF-file")
+    } as Express.Multer.File);
+
+    expect(prisma.file.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ name: utf8Name })
+      })
+    );
+  });
+
+  it("prefers the explicit UTF-8 filename field when provided", async () => {
+    const { service, prisma } = createService();
+    const utf8Name = "测试文档.pdf";
+
+    await service.upload(
+      "user-1",
+      {
+        originalname: "broken-name.pdf",
+        mimetype: "application/pdf",
+        size: 1234,
+        buffer: Buffer.from("%PDF-file")
+      } as Express.Multer.File,
+      utf8Name
+    );
+
+    expect(prisma.file.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ name: utf8Name })
+      })
+    );
+  });
 });
 
 describe("FilesService.completeUpload", () => {

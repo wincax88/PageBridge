@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { deleteFile, emptyTrash, getStorageUsage, getSyncState, listDeletedFiles, listFiles, listSyncChanges, login, logout, permanentlyDeleteFile, refreshAccessToken, register, renameFile, restoreFile, uploadPdf, type DeletedFileRecord, type FileRecord } from "../lib/api";
+import { deleteFile, emptyTrash, getStorageUsage, getSyncState, listDeletedFiles, listFiles, listSyncChanges, login, logout, permanentlyDeleteFile, refreshAccessToken, register, renameFile, restoreFile, updateFileFavorite, uploadPdf, type DeletedFileRecord, type FileRecord } from "../lib/api";
 import { offlineDb } from "../lib/offline-db";
 import { useAuthStore } from "../store/auth-store";
 
@@ -160,6 +160,16 @@ export function App() {
     onError: (error) => setFileActionError(error instanceof Error ? error.message : "Failed to delete file")
   });
 
+  const favoriteFileMutation = useMutation({
+    mutationFn: ({ fileId, isFavorite }: { fileId: string; isFavorite: boolean }) => updateFileFavorite(accessToken!, fileId, isFavorite),
+    onSuccess: (file) => {
+      applyFileRecord(file);
+      setFileActionError(null);
+      queryClient.invalidateQueries({ queryKey: ["files", accessToken] });
+    },
+    onError: (error) => setFileActionError(error instanceof Error ? error.message : "Failed to update favorite")
+  });
+
   useEffect(() => {
     if (!accessToken) return;
 
@@ -288,6 +298,12 @@ export function App() {
       await queuePendingFileDelete(file.id);
       setFileActionError(error instanceof Error ? `${error.message}. Delete queued for retry.` : "Delete queued for retry.");
     }
+  }
+
+  function handleToggleFavorite(file: FileRecord) {
+    const nextFavorite = !file.isFavorite;
+    applyFileRecord({ ...file, isFavorite: nextFavorite });
+    favoriteFileMutation.mutate({ fileId: file.id, isFavorite: nextFavorite });
   }
 
   function applyFileRename(fileId: string, name: string) {
@@ -469,9 +485,9 @@ export function App() {
     ? files.filter((file) => file.name.toLowerCase().includes(fileSearch.trim().toLowerCase()))
     : files;
   const isFavoritesRoute = location.pathname === "/favorites";
-  const visibleFiles = isFavoritesRoute ? [] : filteredFiles;
+  const visibleFiles = isFavoritesRoute ? filteredFiles.filter((file) => file.isFavorite) : filteredFiles;
   const emptyDocumentMessage = isFavoritesRoute
-    ? "暂无收藏文档。收藏功能接入后会显示你标记的 PDF。"
+    ? "暂无收藏文档。点击文档卡片上的星标即可收藏。"
     : `没有匹配“${fileSearch}”的 PDF。`;
   const recentFiles = filteredFiles.slice(0, 2);
   const effectiveDocumentView = documentView;
@@ -663,6 +679,34 @@ export function App() {
                 navigate(`/reader/${file.id}`);
               }}>
                 <div className="pdf-cover" aria-hidden="true"><FileText size={effectiveDocumentView === "list" ? 28 : 64} strokeWidth={2.2} /></div>
+                <div className="card-quick-actions" aria-label="文档快捷操作">
+                  <button
+                    className={file.isFavorite ? "quick-action active" : "quick-action"}
+                    type="button"
+                    aria-label={file.isFavorite ? "取消收藏" : "收藏"}
+                    title={file.isFavorite ? "取消收藏" : "收藏"}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleToggleFavorite(file);
+                    }}
+                    disabled={favoriteFileMutation.isPending}
+                  >
+                    <Star size={17} fill={file.isFavorite ? "currentColor" : "none"} />
+                  </button>
+                  <button
+                    className="quick-action danger"
+                    type="button"
+                    aria-label="删除"
+                    title="删除"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setDeleteTarget(file);
+                    }}
+                    disabled={deleteFileMutation.isPending}
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </div>
                 <div className="file-card-body">
                   <strong>{file.name}</strong>
                   {effectiveDocumentView === "grid" ? (
